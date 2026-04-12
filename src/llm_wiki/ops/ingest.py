@@ -6,7 +6,7 @@ from pathlib import Path
 
 from llm_wiki.llm.base import LLMClient
 from llm_wiki.markdown import read_text, slugify
-from llm_wiki.models import AppConfig, IngestRequest, RepoPaths
+from llm_wiki.models import AppConfig, IngestRequest, IngestResult, RepoPaths
 from llm_wiki.ops.common import append_log_entry, write_wiki_draft
 from llm_wiki.ops.rebuild_index import rebuild_index
 from llm_wiki.ops.search import list_candidates
@@ -34,7 +34,7 @@ def _planned_storage_destination(repo_paths: RepoPaths, source_path: Path) -> Pa
     return destination
 
 
-def _store_source(repo_paths: RepoPaths, source_path: Path, destination: Path) -> Path:
+def _store_source(repo_paths: RepoPaths, source_path: Path, destination: Path) -> tuple[Path, str]:
     try:
         source_path.resolve().relative_to(destination.parents[1] / "inbox")
         is_in_inbox = True
@@ -58,8 +58,12 @@ def ingest_sources(
     repo_paths: RepoPaths,
     client: LLMClient,
     source_paths: list[Path],
-) -> list[str]:
+) -> IngestResult:
     all_touched: list[str] = []
+    processed_sources: list[str] = []
+    source_pages: list[str] = []
+    entity_pages: list[str] = []
+    concept_pages: list[str] = []
     schema_text = (repo_paths.config_dir / "schema.md").read_text(encoding="utf-8")
     index_text = repo_paths.index.read_text(encoding="utf-8")
 
@@ -80,30 +84,30 @@ def ingest_sources(
         response = client.ingest(request)
 
         source_page_default = f"sources/{storage_destination.stem}.md"
-        touched.append(
-            write_wiki_draft(
-                response.source_page,
+        source_page_path = write_wiki_draft(
+            response.source_page,
+            repo_paths=repo_paths,
+            default_relative_path=source_page_default,
+            source_refs=[stored_relative],
+        )
+        touched.append(source_page_path)
+        source_pages.append(source_page_path)
+        for draft in response.entity_pages:
+            page_path = write_wiki_draft(
+                draft,
                 repo_paths=repo_paths,
-                default_relative_path=source_page_default,
                 source_refs=[stored_relative],
             )
-        )
-        for draft in response.entity_pages:
-            touched.append(
-                write_wiki_draft(
-                    draft,
-                    repo_paths=repo_paths,
-                    source_refs=[stored_relative],
-                )
-            )
+            touched.append(page_path)
+            entity_pages.append(page_path)
         for draft in response.concept_pages:
-            touched.append(
-                write_wiki_draft(
-                    draft,
-                    repo_paths=repo_paths,
-                    source_refs=[stored_relative],
-                )
+            page_path = write_wiki_draft(
+                draft,
+                repo_paths=repo_paths,
+                source_refs=[stored_relative],
             )
+            touched.append(page_path)
+            concept_pages.append(page_path)
         index_text = rebuild_index(repo_paths)
         touched.append(repo_relative(repo_paths.index, repo_paths.base_dir))
         append_log_entry(
@@ -116,5 +120,12 @@ def ingest_sources(
         _store_source(repo_paths, source_path, storage_destination)
         touched.append(repo_relative(repo_paths.log, repo_paths.base_dir))
         all_touched.extend(touched)
+        processed_sources.append(stored_relative)
 
-    return sorted(set(all_touched))
+    return IngestResult(
+        touched=sorted(set(all_touched)),
+        processed_sources=processed_sources,
+        source_pages=source_pages,
+        entity_pages=entity_pages,
+        concept_pages=concept_pages,
+    )

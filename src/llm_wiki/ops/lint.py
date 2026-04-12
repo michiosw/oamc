@@ -4,8 +4,8 @@ from collections import defaultdict
 
 from llm_wiki.llm.base import LLMClient
 from llm_wiki.markdown import extract_wikilinks, link_target_for_path
-from llm_wiki.models import AppConfig, LintIssue, LintRequest, RepoPaths
-from llm_wiki.ops.common import append_log_entry, write_wiki_draft
+from llm_wiki.models import AppConfig, LintIssue, LintRequest, LintResult, RepoPaths
+from llm_wiki.ops.common import append_log_entry, normalize_existing_wiki_page, write_wiki_draft
 from llm_wiki.ops.rebuild_index import rebuild_index
 from llm_wiki.ops.search import inbound_link_counts, iter_wiki_pages, relative_link_targets
 from llm_wiki.paths import repo_relative
@@ -46,18 +46,35 @@ def run_lint(
     config: AppConfig,
     repo_paths: RepoPaths,
     client: LLMClient,
-) -> tuple[list[LintIssue], list[str]]:
+) -> LintResult:
+    touched: list[str] = []
+    normalized_pages: list[str] = []
+    for page in iter_wiki_pages(repo_paths):
+        relative_path = page.relative_to(repo_paths.wiki_root).as_posix()
+        original = page.read_text(encoding="utf-8")
+        normalized = normalize_existing_wiki_page(relative_path, original)
+        if normalized != original:
+            page.write_text(normalized, encoding="utf-8")
+            touched.append(relative_path)
+            normalized_pages.append(relative_path)
+
     issues = detect_issues(repo_paths)
     if not issues:
         rebuild_index(repo_paths)
+        touched.append(repo_relative(repo_paths.index, repo_paths.base_dir))
         append_log_entry(
             repo_paths,
             operation="lint",
             title="no-op",
             summary="No structural wiki issues were detected.",
-            touched_pages=["index.md", "log.md"],
+            touched_pages=sorted(set(touched or ["wiki/index.md"])),
         )
-        return [], ["index.md", "log.md"]
+        touched.append(repo_relative(repo_paths.log, repo_paths.base_dir))
+        return LintResult(
+            issues=[],
+            touched=sorted(set(touched)),
+            normalized_pages=normalized_pages,
+        )
 
     page_contexts: dict[str, str] = {}
     for issue in issues:
@@ -74,7 +91,6 @@ def run_lint(
         page_contexts=page_contexts,
     )
     response = client.lint(request)
-    touched: list[str] = []
     for draft in response.created_pages:
         touched.append(write_wiki_draft(draft, repo_paths=repo_paths))
     for draft in response.updated_pages:
@@ -89,4 +105,8 @@ def run_lint(
         touched_pages=sorted(set(touched)),
     )
     touched.append(repo_relative(repo_paths.log, repo_paths.base_dir))
-    return issues, sorted(set(touched))
+    return LintResult(
+        issues=issues,
+        touched=sorted(set(touched)),
+        normalized_pages=normalized_pages,
+    )

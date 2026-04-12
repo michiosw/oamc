@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from llm_wiki.llm.base import LLMClient
-from llm_wiki.markdown import slugify
-from llm_wiki.models import AppConfig, QueryRequest, RepoPaths
+from llm_wiki.markdown import extract_section, slugify, summary_from_content, title_from_content
+from llm_wiki.models import AppConfig, QueryRequest, QueryResult, RepoPaths
 from llm_wiki.ops.common import append_log_entry, write_wiki_draft
 from llm_wiki.ops.rebuild_index import rebuild_index
 from llm_wiki.ops.search import load_page_contexts, search_pages
@@ -16,7 +16,7 @@ def run_query(
     question: str,
     *,
     write_page: bool,
-) -> list[str]:
+) -> QueryResult:
     candidates = search_pages(
         repo_paths,
         question,
@@ -36,16 +36,16 @@ def run_query(
     )
     response = client.query(request)
     touched: list[str] = []
+    page_path: str | None = None
     if write_page:
         default_relative_path = f"syntheses/{slugify(question)[:80]}.md"
-        touched.append(
-            write_wiki_draft(
-                response.page,
-                repo_paths=repo_paths,
-                default_relative_path=default_relative_path,
-                source_refs=[candidate.relative_path for candidate in candidates],
-            )
+        page_path = write_wiki_draft(
+            response.page,
+            repo_paths=repo_paths,
+            default_relative_path=default_relative_path,
+            source_refs=[candidate.relative_path for candidate in candidates],
         )
+        touched.append(page_path)
         rebuild_index(repo_paths)
         touched.append(repo_relative(repo_paths.index, repo_paths.base_dir))
         append_log_entry(
@@ -56,4 +56,12 @@ def run_query(
             touched_pages=sorted(set(touched)),
         )
         touched.append(repo_relative(repo_paths.log, repo_paths.base_dir))
-    return sorted(set(touched))
+    title = title_from_content(response.page.content, fallback=slugify(question).replace("-", " ").title())
+    answer_preview = extract_section(response.page.content, "Summary Answer") or summary_from_content(response.page.content, fallback=title)
+    return QueryResult(
+        touched=sorted(set(touched)),
+        page_path=page_path,
+        title=title,
+        answer_preview=answer_preview,
+        content=response.page.content,
+    )

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from llm_wiki.markdown import dump_markdown, extract_wikilinks, load_markdown, slugify
+from llm_wiki.markdown import (
+    dump_markdown,
+    extract_section,
+    extract_wikilinks,
+    load_markdown,
+    slugify,
+)
 
 
 def test_slugify_normalizes_titles() -> None:
@@ -24,3 +30,17 @@ def test_markdown_round_trip(tmp_path) -> None:
 def test_extract_wikilinks() -> None:
     content = "See [[concepts/llm-wiki]] and [[entities/openai|OpenAI]]."
     assert extract_wikilinks(content) == ["concepts/llm-wiki", "entities/openai"]
+
+
+def test_extract_section() -> None:
+    content = """# Title
+
+## Summary Answer
+
+This is the answer.
+
+## Sources
+
+- one
+"""
+    assert extract_section(content, "Summary Answer") == "This is the answer."

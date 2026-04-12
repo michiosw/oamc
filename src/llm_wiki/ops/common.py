@@ -7,6 +7,7 @@ import re
 from llm_wiki.markdown import (
     dump_markdown,
     link_target_for_path,
+    parse_markdown,
     slugify,
     title_from_content,
     upsert_frontmatter,
@@ -26,7 +27,7 @@ def today_stamp() -> str:
 
 
 def ensure_default_sources_section(content: str, source_refs: list[str]) -> str:
-    normalized = re.sub(r"\n## Sources\n.*$", "", content.strip(), flags=re.DOTALL)
+    normalized = re.sub(r"\n#{1,6}\s+Sources\s*\n.*$", "", content.strip(), flags=re.DOTALL)
     lines = ["## Sources"]
     for source in source_refs:
         lines.append(f"- {source}")
@@ -113,7 +114,15 @@ def append_log_entry(
 ) -> None:
     timestamp = today_stamp()
     heading = f"## [{timestamp}] {operation} | {title}".strip()
-    touched_lines = "\n".join(f"- [[{link_target_for_path(page)}]]" for page in touched_pages)
+    touched_targets = []
+    for page in touched_pages:
+        if page == "wiki/index.md":
+            touched_targets.append("index")
+        elif page == "wiki/log.md":
+            touched_targets.append("log")
+        else:
+            touched_targets.append(link_target_for_path(page))
+    touched_lines = "\n".join(f"- [[{target}]]" for target in touched_targets)
     new_entry = (
         f"{heading}\n\n"
         f"{summary.strip()}\n\n"
@@ -142,3 +151,17 @@ def default_page(relative_path: str, title: str, body: str) -> str:
         },
         body,
     )
+
+
+def normalize_existing_wiki_page(relative_path: str, content: str) -> str:
+    post = parse_markdown(content)
+    metadata = dict(post.metadata)
+    if not metadata:
+        return content
+
+    source_refs = metadata.get("source_refs")
+    if not isinstance(source_refs, list):
+        source_refs = []
+    normalized_body = ensure_default_sources_section(post.content, source_refs)
+    normalized_content = dump_markdown(metadata, normalized_body)
+    return normalized_content

@@ -9,6 +9,7 @@ import frontmatter
 
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
+HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 
 
 def slugify(value: str) -> str:
@@ -99,3 +100,28 @@ def strip_frontmatter_block(content: str) -> str:
     if match:
         return content[match.end() :]
     return content
+
+
+def extract_section(content: str, heading: str) -> str:
+    post = parse_markdown(content)
+    lines = post.content.splitlines()
+    target = heading.strip().lower()
+    collecting = False
+    target_level = 0
+    collected: list[str] = []
+
+    for line in lines:
+        match = HEADING_RE.match(line.strip())
+        if match:
+            level = len(match.group(1))
+            title = match.group(2).strip().lower()
+            if collecting and level <= target_level:
+                break
+            if title == target:
+                collecting = True
+                target_level = level
+                continue
+        if collecting:
+            collected.append(line)
+
+    return "\n".join(collected).strip()

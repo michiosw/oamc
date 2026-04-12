@@ -150,13 +150,14 @@ def test_cli_smoke_workflows(temp_workspace: Path, runner: CliRunner, monkeypatc
         [
             "query",
             "What are the main design patterns in my notes?",
-            "--write-page",
             "--base-dir",
             str(temp_workspace),
         ],
     )
     assert result.exit_code == 0, result.output
     assert (temp_workspace / "wiki" / "syntheses" / "design-patterns.md").exists()
+    assert "# Design Patterns" in result.output
+    assert "compiled wiki" in result.output
 
     result = runner.invoke(app, ["lint", "--base-dir", str(temp_workspace)])
     assert result.exit_code == 0, result.output
@@ -174,6 +175,15 @@ def test_init_command_creates_workspace(tmp_path: Path, runner: CliRunner) -> No
     assert result.exit_code == 0, result.output
     assert (tmp_path / "config" / "config.yaml").exists()
     assert (tmp_path / "wiki" / "index.md").exists()
+
+
+def test_ingest_with_empty_inbox_exits_cleanly(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
+    from llm_wiki import cli
+
+    monkeypatch.setattr(cli, "build_client", lambda config: FakeLLMClient())
+    result = runner.invoke(app, ["ingest", "--base-dir", str(temp_workspace)])
+    assert result.exit_code == 0, result.output
+    assert "Inbox is empty" in result.output
 
 
 class FailingLLMClient(LLMClient):
@@ -254,7 +264,7 @@ def test_query_recovers_from_malformed_frontmatter(temp_workspace: Path) -> None
     )
     config, paths = load_config(temp_workspace)
 
-    touched = run_query(
+    result = run_query(
         config,
         paths,
         MalformedQueryLLMClient(),
@@ -267,4 +277,24 @@ def test_query_recovers_from_malformed_frontmatter(temp_workspace: Path) -> None
     assert synthesis_path.exists()
     assert "title: GPT-5.4 and Frontend Design" in content
     assert content.count("## Sources") == 1
-    assert "syntheses/bad-frontmatter.md" in touched
+    assert "syntheses/bad-frontmatter.md" in result.touched
+
+
+def test_process_command_runs_ingest_and_lint(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
+    from llm_wiki import cli
+
+    monkeypatch.setattr(cli, "build_client", lambda config: FakeLLMClient())
+    source_path = temp_workspace / "raw" / "inbox" / "sample-note.md"
+    source_path.write_text("# Sample Note\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["process", "--base-dir", str(temp_workspace)])
+    assert result.exit_code == 0, result.output
+    assert "Processed inbox" in result.output
+    assert "Lint complete" in result.output
+
+
+def test_status_command_reports_counts(temp_workspace: Path, runner: CliRunner) -> None:
+    result = runner.invoke(app, ["status", "--base-dir", str(temp_workspace)])
+    assert result.exit_code == 0, result.output
+    assert "LLM Wiki Status" in result.output
+    assert "Inbox files: 0" in result.output

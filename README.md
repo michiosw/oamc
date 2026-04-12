@@ -50,23 +50,22 @@ export OPENAI_API_KEY=...
 uv run llm-wiki init
 ```
 
-Drop a markdown web clip into `raw/inbox/`, then run:
+Drop markdown sources into `raw/inbox/`, then run the one-command daily workflow:
 
 ```bash
-uv run llm-wiki ingest
+uv run llm-wiki process
 ```
 
-Ask a question and file the answer back into the wiki:
+Ask a question and get both a saved page and a terminal answer preview:
 
 ```bash
-uv run llm-wiki query "What are the main design patterns in my notes?" --write-page
+uv run llm-wiki query "What does the wiki currently know about prompt engineering and frontend design?"
 ```
 
-Run periodic maintenance:
+Check current state any time:
 
 ```bash
-uv run llm-wiki lint
-uv run llm-wiki rebuild-index
+uv run llm-wiki status
 ```
 
 ## Obsidian setup
@@ -89,10 +88,39 @@ Suggested workflow:
 
 1. Clip a source into `raw/inbox/`
 2. Download its images into `raw/assets/` if needed
-3. Run `uv run llm-wiki ingest`
-4. Review the git diff in Obsidian or your editor
-5. Ask questions with `uv run llm-wiki query ...`
-6. Run `uv run llm-wiki lint` occasionally
+3. Run `uv run llm-wiki process`
+4. Review the new wiki pages in Obsidian
+5. Ask questions with `uv run llm-wiki query "..."`
+6. Commit `raw/` and `wiki/` when the changes look good
+
+## Daily commands
+
+`uv run llm-wiki process`
+
+- Processes everything currently in `raw/inbox/`
+- Rebuilds the index
+- Runs a lint pass
+- Leaves you with a clean wiki state
+
+`uv run llm-wiki query "..."`
+
+- Searches the wiki
+- Writes a synthesis page by default
+- Prints the answer preview directly in the terminal
+
+`uv run llm-wiki status`
+
+- Shows inbox count
+- Shows wiki page count
+- Shows the latest log entry
+
+`uv run llm-wiki ingest`
+
+- Lower-level command when you only want ingest behavior
+
+`uv run llm-wiki lint`
+
+- Lower-level maintenance command when you want cleanup without new ingest
 
 ## Notes
 

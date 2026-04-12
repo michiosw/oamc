@@ -81,6 +81,14 @@ class IngestResponse(BaseModel):
     notes: str = ""
 
 
+class IngestResult(BaseModel):
+    touched: list[str] = Field(default_factory=list)
+    processed_sources: list[str] = Field(default_factory=list)
+    source_pages: list[str] = Field(default_factory=list)
+    entity_pages: list[str] = Field(default_factory=list)
+    concept_pages: list[str] = Field(default_factory=list)
+
+
 class QueryRequest(BaseModel):
     question: str
     schema_text: str
@@ -92,6 +100,14 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     page: PageDraft
     notes: str = ""
+
+
+class QueryResult(BaseModel):
+    touched: list[str] = Field(default_factory=list)
+    page_path: str | None = None
+    title: str = ""
+    answer_preview: str = ""
+    content: str = ""
 
 
 class LintIssue(BaseModel):
@@ -111,3 +127,9 @@ class LintResponse(BaseModel):
     created_pages: list[PageDraft] = Field(default_factory=list)
     updated_pages: list[PageDraft] = Field(default_factory=list)
     notes: str = ""
+
+
+class LintResult(BaseModel):
+    issues: list[LintIssue] = Field(default_factory=list)
+    touched: list[str] = Field(default_factory=list)
+    normalized_pages: list[str] = Field(default_factory=list)
