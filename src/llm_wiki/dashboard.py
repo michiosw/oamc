@@ -106,7 +106,19 @@ def render_home(repo_paths: RepoPaths) -> str:
     config, _ = load_config(repo_paths.base_dir)
     report = build_doctor_report(config, repo_paths, assume_dashboard_serving=True)
     pages = sorted(iter_wiki_pages(repo_paths), key=lambda path: path.stat().st_mtime, reverse=True)
-    recent = pages[:8]
+    latest_source_page = next(
+        (
+            page
+            for page in pages
+            if report.latest_ingest and f"sources/{page.stem}" in report.latest_ingest.touched_pages
+        ),
+        None,
+    )
+    prioritized_pages: list[Path] = []
+    if latest_source_page is not None:
+        prioritized_pages.append(latest_source_page)
+    prioritized_pages.extend(page for page in pages if page != latest_source_page)
+    recent = prioritized_pages[:8]
     stats = {
         "Sources": len(list((repo_paths.wiki_root / "sources").glob("*.md"))),
         "Entities": len(list((repo_paths.wiki_root / "entities").glob("*.md"))),
@@ -137,16 +149,17 @@ def render_home(repo_paths: RepoPaths) -> str:
     </section>
     {render_ask_form(compact=True)}
     <section class="stats">{stat_html}</section>
+    {latest_ingest_html}
     <section class="split">
       <div>
-        <h2>Recent pages</h2>
+        <h2>Recent wiki pages</h2>
+        <p class="meta-line">This list includes the newest source page first, then the most recently touched wiki pages.</p>
         <ul class="page-list">{recent_html}</ul>
       </div>
       <div>
         {health_html}
       </div>
     </section>
-    {latest_ingest_html}
     """
 
 
