@@ -136,23 +136,30 @@ def render_home(repo_paths: RepoPaths) -> str:
     latest_ingest_html = render_latest_ingest(repo_paths, report)
     health_html = render_health_surface(repo_paths, report, inbox_count)
     return f"""
-    <section class="hero-grid">
-      <div class="hero">
-        <p class="eyebrow">Local wiki workspace</p>
-        <h1>Research against the wiki, not against scattered notes.</h1>
-        <p class="lede">Clip into <code>raw/inbox/</code>, let the watcher process it, then ask one bounded research question at a time.</p>
-      </div>
-      <div class="hero-note">
-        <p class="eyebrow">Official workflow</p>
-        <p class="meta-line">The supported ingest path is <code>raw/inbox/</code>. Anything left in <code>Clippings/</code> is outside the pipeline.</p>
-        <p class="meta-line">On macOS, the canonical runtime is <code>uv run llm-wiki install-menubar</code>.</p>
+    <section class="hero-stage">
+      <div class="hero-grid">
+        <div class="hero">
+          <p class="eyebrow">Local wiki workspace</p>
+          <h1>Research against the wiki, not against scattered notes.</h1>
+          <p class="lede">Clip into <code>raw/inbox/</code>, let the watcher process it, then ask one bounded research question at a time.</p>
+        </div>
+        <div class="hero-note">
+          <p class="eyebrow">Official workflow</p>
+          <p class="meta-line">The supported ingest path is <code>raw/inbox/</code>. Anything left in <code>Clippings/</code> is outside the pipeline.</p>
+          <p class="meta-line">On macOS, the canonical runtime is <code>uv run llm-wiki install-menubar</code>.</p>
+        </div>
       </div>
     </section>
-    {render_ask_form(compact=True)}
-    <section class="stats">{stat_html}</section>
+    <section class="editorial-band">
+      {render_ask_form(compact=True)}
+      <div class="stats-panel">
+        <p class="eyebrow">Knowledge shape</p>
+        <div class="stats">{stat_html}</div>
+      </div>
+    </section>
     {latest_ingest_html}
     <section class="split">
-      <div>
+      <div class="section-panel">
         <h2>Recent wiki pages</h2>
         <p class="meta-line">This list includes the newest source page first, then the most recently touched wiki pages.</p>
         <ul class="page-list">{recent_html}</ul>
@@ -178,13 +185,20 @@ def render_ask_form(
     )
     return f"""
     <section class="{panel_class}">
-      <p class="eyebrow">Research mode</p>
-      <h2>Ask what the wiki currently knows.</h2>
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Research mode</p>
+          <h2>Ask what the wiki currently knows.</h2>
+        </div>
+        <p class="template-note">Default outcome: a saved synthesis page, not a disposable answer.</p>
+      </div>
       <form action="/ask" method="get" class="ask-form">
         <input type="search" name="q" value="{escape(question)}" placeholder="What does the wiki currently know about..." required>
-        <input type="text" name="scope" value="{escape(scope)}" placeholder="Optional scope: gpt-5-4, frontend-design">
-        <select name="template">{template_options}</select>
-        <button type="submit">Ask</button>
+        <div class="ask-controls">
+          <input type="text" name="scope" value="{escape(scope)}" placeholder="Optional scope: gpt-5-4, frontend-design">
+          <select name="template">{template_options}</select>
+          <button type="submit">Ask</button>
+        </div>
       </form>
       <p class="helper">Every serious question writes a synthesis page, updates the index, and is meant to be continued in Obsidian.</p>
     </section>
@@ -208,7 +222,7 @@ def render_search(repo_paths: RepoPaths, query: str) -> str:
             """
         )
     return f"""
-    <section>
+    <section class="section-panel">
       <p class="eyebrow">Search</p>
       <h1>{escape(query)}</h1>
       <p class="meta-line">Top matches across sources, entities, concepts, and syntheses.</p>
@@ -241,18 +255,22 @@ def render_ask_result(
     return f"""
     {render_ask_form(question, scope, template)}
     <section class="answer-panel">
-      <p class="eyebrow">Saved synthesis</p>
-      <h1>{escape(result.title)}</h1>
+      <div class="panel-heading panel-heading-tight">
+        <div>
+          <p class="eyebrow">Saved synthesis</p>
+          <h1>{escape(result.title)}</h1>
+        </div>
+      </div>
       {saved_html}
       {action_html}
       <div class="answer-copy">{render_markdown(result.answer_preview)}</div>
     </section>
     <section class="split">
-      <div>
+      <div class="section-panel">
         <h2>Context pages</h2>
         <ul class="link-list">{context_html}</ul>
       </div>
-      <div>
+      <div class="section-panel">
         <h2>What happened</h2>
         <p class="meta-line">The saved synthesis is the primary artifact. The inline answer is only a preview.</p>
         <p class="meta-line">Keep exploring from the saved page in Obsidian, not from transient chat context.</p>
@@ -384,11 +402,13 @@ def render_health_surface(repo_paths: RepoPaths, report: DoctorReport, inbox_cou
     <section class="status-card">
       <p class="eyebrow">Inbox health</p>
       <h2>Workspace status</h2>
-      <p class="meta-line">Inbox files: <strong>{inbox_count}</strong></p>
-      <p class="meta-line">Latest source: <code>{escape(report.latest_processed_source or 'none yet')}</code></p>
-      <p class="meta-line">Latest log: {escape(report.latest_log_heading or 'none yet')}</p>
-      <p class="meta-line">Index: <strong>{escape(index_check.detail if index_check else 'unknown')}</strong></p>
-      <p class="meta-line">Runtime: <strong>{escape(runtime_check.detail if runtime_check else 'unknown')}</strong></p>
+      <dl class="status-list">
+        <div><dt>Inbox files</dt><dd>{inbox_count}</dd></div>
+        <div><dt>Latest source</dt><dd><code>{escape(report.latest_processed_source or 'none yet')}</code></dd></div>
+        <div><dt>Latest log</dt><dd>{escape(report.latest_log_heading or 'none yet')}</dd></div>
+        <div><dt>Index</dt><dd>{escape(index_check.detail if index_check else 'unknown')}</dd></div>
+        <div><dt>Runtime</dt><dd>{escape(runtime_check.detail if runtime_check else 'unknown')}</dd></div>
+      </dl>
       {clippings_note}
       <p class="meta-line">Next step: {escape(report.recommended_next_step)}</p>
     </section>
@@ -421,14 +441,14 @@ def render_latest_ingest(repo_paths: RepoPaths, report: DoctorReport) -> str:
         summary_html += f'<ul class="summary-list">{points_html}</ul>'
     return f"""
     <section class="split split-tight">
-      <div class="answer-panel">
+      <div class="answer-panel ingest-panel">
         <p class="eyebrow">Latest ingest</p>
         <h2>{escape(entry.title)}</h2>
         <p class="meta-line">Raw source: <code>{escape(report.latest_processed_source or 'unknown')}</code></p>
         {summary_html}
         {source_action}
       </div>
-      <div class="status-card">
+      <div class="status-card touched-panel">
         <p class="eyebrow">Touched pages</p>
         <ul class="link-list">{related_html}</ul>
       </div>
@@ -483,12 +503,15 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       --bg-wash: rgba(50, 89, 74, 0.08);
       --panel: rgba(255, 251, 245, 0.78);
       --panel-strong: rgba(255, 251, 245, 0.94);
+      --panel-soft: rgba(255, 251, 245, 0.56);
       --text: #191713;
       --muted: #6f675d;
       --border: rgba(54, 45, 34, 0.10);
       --accent: #295c52;
       --accent-soft: rgba(41, 92, 82, 0.12);
+      --warm-soft: rgba(186, 150, 103, 0.09);
       --shadow: 0 16px 40px rgba(31, 25, 20, 0.06);
+      --shadow-strong: 0 22px 60px rgba(31, 25, 20, 0.08);
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -510,16 +533,29 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
         radial-gradient(circle at 85% 10%, rgba(186, 150, 103, 0.08), transparent 26%);
       opacity: 1;
     }}
+    body::after {{
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(180deg, rgba(255,255,255,0.16), transparent 28%);
+      opacity: 0.9;
+    }}
     a {{
       color: inherit;
       text-decoration-color: rgba(41, 92, 82, 0.3);
       text-underline-offset: 0.18em;
+      transition: color 180ms ease, text-decoration-color 180ms ease;
+    }}
+    a:hover {{
+      color: var(--accent);
+      text-decoration-color: rgba(41, 92, 82, 0.5);
     }}
     code {{ font-family: "SF Mono", "JetBrains Mono", monospace; font-size: 0.92em; }}
     .shell {{
-      max-width: 1180px;
+      max-width: 1240px;
       margin: 0 auto;
-      padding: 28px 24px 56px;
+      padding: 30px 28px 64px;
       position: relative;
       z-index: 1;
     }}
@@ -528,7 +564,7 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       align-items: center;
       justify-content: space-between;
       gap: 24px;
-      padding: 0 0 24px;
+      padding: 0 0 28px;
       border-bottom: 1px solid var(--border);
     }}
     .brand {{
@@ -545,18 +581,18 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       color: var(--muted);
       font-size: 0.95rem;
     }}
-    form {{
+    header form {{
       display: flex;
       gap: 10px;
       min-width: min(460px, 100%);
     }}
-    input[type="search"] {{
+    header input[type="search"] {{
       flex: 1;
       border: 1px solid var(--border);
       background: var(--panel-strong);
       color: var(--text);
       border-radius: 999px;
-      padding: 12px 16px;
+      padding: 13px 18px;
       font: inherit;
       box-shadow: inset 0 1px 0 rgba(255,255,255,0.45);
     }}
@@ -575,36 +611,59 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       background: var(--accent);
     }}
     main {{
-      padding-top: 28px;
+      padding-top: 34px;
       display: grid;
-      gap: 28px;
+      gap: 34px;
+    }}
+    .hero-stage {{
+      position: relative;
+      padding: 8px 0 6px;
+      animation: rise-in 420ms ease both;
+    }}
+    .hero-stage::before {{
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-top: 1px solid rgba(41, 92, 82, 0.14);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0)),
+        radial-gradient(circle at 12% 18%, rgba(41, 92, 82, 0.10), transparent 26%);
+      border-radius: 32px;
+      z-index: -1;
     }}
     .hero-grid {{
       display: grid;
-      grid-template-columns: minmax(0, 1.8fr) minmax(280px, 0.9fr);
-      gap: 28px;
-      align-items: end;
+      grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.85fr);
+      gap: 30px;
+      align-items: stretch;
+    }}
+    .hero {{
+      max-width: 760px;
+      padding: 18px 0 8px;
     }}
     .hero h1, article h1, section h1 {{
       margin: 0 0 12px;
       font-family: {DISPLAY_FONT};
       font-size: clamp(2.2rem, 4vw, 4.2rem);
-      line-height: 0.98;
+      line-height: 0.95;
       letter-spacing: -0.04em;
-      max-width: 12ch;
+      max-width: 11ch;
     }}
     .hero-note {{
-      padding: 18px 20px;
-      border-radius: 24px;
+      display: grid;
+      align-content: end;
+      gap: 10px;
+      padding: 22px 24px;
+      border-radius: 28px;
       border: 1px solid var(--border);
-      background: linear-gradient(180deg, rgba(255,251,245,0.88), rgba(255,251,245,0.58));
+      background: linear-gradient(180deg, rgba(255,251,245,0.88), rgba(255,251,245,0.62));
       box-shadow: var(--shadow);
-      backdrop-filter: blur(12px);
+      backdrop-filter: blur(14px);
     }}
     h2 {{
       font-family: {DISPLAY_FONT};
       font-size: 1.5rem;
-      margin: 0 0 12px;
+      margin: 0 0 10px;
       letter-spacing: -0.02em;
     }}
     .eyebrow {{
@@ -618,64 +677,106 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       color: var(--muted);
       max-width: 70ch;
     }}
+    .lede {{
+      font-size: 1.06rem;
+      max-width: 44ch;
+      margin: 0;
+    }}
+    .editorial-band {{
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.9fr);
+      gap: 20px;
+      align-items: start;
+      animation: rise-in 520ms ease both;
+    }}
+    .stats-panel {{
+      padding-top: 8px;
+    }}
     .stats {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 14px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
     }}
     .ask-panel,
     .answer-panel,
     .stat {{
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 24px;
-      padding: 20px;
+      border-radius: 26px;
+      padding: 22px;
       box-shadow: var(--shadow);
       backdrop-filter: blur(14px);
     }}
     .ask-panel-compact {{
-      padding: 22px 22px 20px;
+      padding: 24px 24px 22px;
+    }}
+    .panel-heading {{
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+    }}
+    .panel-heading-tight {{
+      margin-bottom: 4px;
+    }}
+    .template-note {{
+      max-width: 24ch;
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.45;
     }}
     .ask-form {{
       display: grid;
-      gap: 12px;
+      gap: 14px;
       min-width: 0;
-      margin-top: 20px;
+      margin-top: 18px;
     }}
     .ask-form input[type="search"],
     .ask-form input[type="text"],
     .ask-form select {{
       width: 100%;
       border: 1px solid var(--border);
-      background: rgba(255,255,255,0.72);
+      background: rgba(255,255,255,0.74);
       color: var(--text);
       border-radius: 16px;
-      padding: 12px 16px;
+      padding: 13px 16px;
       font: inherit;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
+    }}
+    .ask-controls {{
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) 180px auto;
+      gap: 12px;
+      align-items: center;
     }}
     .helper {{
       color: var(--muted);
-      margin: 12px 0 0;
+      margin: 10px 0 0;
+      max-width: 56ch;
     }}
     .stat-label {{
       color: var(--muted);
-      font-size: 0.9rem;
+      font-size: 0.78rem;
       text-transform: uppercase;
       letter-spacing: 0.1em;
     }}
     .stat-value {{
-      margin-top: 8px;
+      margin-top: 10px;
       font-family: {DISPLAY_FONT};
-      font-size: 2.4rem;
+      font-size: clamp(2rem, 3vw, 2.8rem);
       letter-spacing: -0.04em;
     }}
     .split {{
       display: grid;
-      grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
-      gap: 28px;
+      grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.95fr);
+      gap: 24px;
     }}
     .split-tight {{
       gap: 20px;
+    }}
+    .section-panel {{
+      padding: 4px 0;
     }}
     .page-list, .result-list, .link-list {{
       list-style: none;
@@ -683,20 +784,21 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       margin: 0;
     }}
     .page-list li, .result {{
-      padding: 18px 0;
+      padding: 18px 0 20px;
       border-top: 1px solid var(--border);
-      transition: transform 180ms ease;
+      transition: transform 180ms ease, border-color 180ms ease;
     }}
     .page-list li:hover, .result:hover {{
       transform: translateX(4px);
+      border-color: rgba(41, 92, 82, 0.2);
     }}
     .page {{
       max-width: 760px;
       background: var(--panel-strong);
       border: 1px solid var(--border);
-      border-radius: 28px;
-      padding: 26px 28px 30px;
-      box-shadow: var(--shadow);
+      border-radius: 30px;
+      padding: 30px 32px 34px;
+      box-shadow: var(--shadow-strong);
     }}
     .result-title, .page-list a {{
       font-size: 1.08rem;
@@ -706,11 +808,12 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
     .result-path {{
       color: var(--muted);
       font-size: 0.9rem;
-      margin-top: 3px;
+      margin-top: 4px;
     }}
     .result-summary {{
-      margin: 6px 0 0;
+      margin: 7px 0 0;
       color: var(--muted);
+      max-width: 52ch;
     }}
     .meta-list {{
       display: flex;
@@ -728,9 +831,9 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       align-items: baseline;
     }}
     .sidebar {{
-      padding: 20px;
+      padding: 22px;
       border: 1px solid var(--border);
-      border-radius: 24px;
+      border-radius: 26px;
       background: var(--panel);
       box-shadow: var(--shadow);
       align-self: start;
@@ -738,17 +841,44 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       top: 24px;
     }}
     .markdown-body {{
-      font-size: 1.05rem;
+      font-size: 1.06rem;
+      line-height: 1.7;
     }}
     .answer-copy {{
-      font-size: 1.05rem;
+      font-size: 1.06rem;
+      line-height: 1.72;
     }}
     .status-card {{
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 24px;
-      padding: 20px;
+      border-radius: 26px;
+      padding: 22px;
       box-shadow: var(--shadow);
+    }}
+    .status-list {{
+      display: grid;
+      gap: 14px;
+      margin: 0 0 14px;
+    }}
+    .status-list div {{
+      display: grid;
+      gap: 4px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }}
+    .status-list div:first-child {{
+      border-top: 0;
+      padding-top: 0;
+    }}
+    .status-list dt {{
+      color: var(--muted);
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }}
+    .status-list dd {{
+      margin: 0;
+      color: var(--text);
     }}
     .status-warn {{
       margin: 12px 0;
@@ -761,7 +891,7 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
-      margin: 12px 0 16px;
+      margin: 14px 0 16px;
     }}
     .action-link {{
       display: inline-flex;
@@ -770,16 +900,23 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       border-radius: 999px;
       background: var(--text);
       color: white;
-      padding: 10px 14px;
+      padding: 10px 15px;
       text-decoration: none;
       font-size: 0.95rem;
+      box-shadow: 0 10px 24px rgba(25, 23, 19, 0.12);
     }}
     .action-link:hover {{
+      color: white;
       background: var(--accent);
       text-decoration: none;
+      transform: translateY(-1px);
     }}
     .action-link-muted {{
-      background: rgba(25, 23, 19, 0.08);
+      background: rgba(25, 23, 19, 0.07);
+      color: var(--text);
+      box-shadow: none;
+    }}
+    .action-link-muted:hover {{
       color: var(--text);
     }}
     .answer-copy > :first-child {{
@@ -803,12 +940,96 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       border-left: 2px solid var(--border);
       color: var(--muted);
     }}
+    .summary-intro {{
+      margin-bottom: 10px;
+    }}
+    .summary-list {{
+      margin: 0;
+      padding-left: 1.1em;
+      color: var(--muted);
+      display: grid;
+      gap: 8px;
+    }}
+    .touched-panel .link-list li,
+    .section-panel .link-list li {{
+      padding: 11px 0;
+      border-top: 1px solid var(--border);
+    }}
+    .touched-panel .link-list li:first-child,
+    .section-panel .link-list li:first-child {{
+      border-top: 0;
+      padding-top: 0;
+    }}
+    .ingest-panel {{
+      position: relative;
+      overflow: hidden;
+    }}
+    .ingest-panel::after {{
+      content: "";
+      position: absolute;
+      inset: auto -14% -26% auto;
+      width: 220px;
+      height: 220px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(41, 92, 82, 0.14), transparent 70%);
+      pointer-events: none;
+    }}
+    .ask-panel,
+    .stats-panel,
+    .answer-panel,
+    .status-card,
+    .page,
+    .sidebar,
+    .section-panel {{
+      animation: rise-in 520ms ease both;
+    }}
+    .stats-panel {{
+      animation-delay: 60ms;
+    }}
+    .answer-panel {{
+      animation-delay: 80ms;
+    }}
+    .status-card {{
+      animation-delay: 100ms;
+    }}
+    @keyframes rise-in {{
+      from {{
+        opacity: 0;
+        transform: translateY(10px);
+      }}
+      to {{
+        opacity: 1;
+        transform: translateY(0);
+      }}
+    }}
     @media (max-width: 860px) {{
-      header, .split, .hero-grid {{ grid-template-columns: 1fr; display: grid; }}
-      form {{ min-width: 0; }}
-      .ask-form {{ grid-template-columns: 1fr; }}
+      header, .split, .hero-grid, .editorial-band {{ grid-template-columns: 1fr; display: grid; }}
+      header form {{ min-width: 0; }}
+      .ask-controls {{ grid-template-columns: 1fr; }}
+      .panel-heading {{ grid-template-columns: 1fr; display: grid; align-items: start; }}
       .sidebar {{ position: static; }}
-      .shell {{ padding: 24px 18px 48px; }}
+      .stats {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .hero-stage::before {{ border-radius: 24px; }}
+      .shell {{ padding: 24px 18px 52px; }}
+    }}
+    @media (max-width: 560px) {{
+      .hero h1, article h1, section h1 {{
+        max-width: 100%;
+        font-size: clamp(2rem, 11vw, 3.1rem);
+      }}
+      .stats {{
+        grid-template-columns: 1fr 1fr;
+      }}
+      .page {{
+        padding: 24px 22px 28px;
+      }}
+      .ask-panel,
+      .answer-panel,
+      .stat,
+      .status-card,
+      .hero-note {{
+        border-radius: 22px;
+      }}
     }}
   </style>
 </head>
