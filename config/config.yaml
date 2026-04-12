@@ -1,0 +1,21 @@
+model_provider: openai
+model_name: gpt-4.1
+openai_api_key_env: OPENAI_API_KEY
+base_dir: .
+paths:
+  raw_inbox: raw/inbox
+  raw_sources: raw/sources
+  assets: raw/assets
+  wiki_root: wiki
+  index: wiki/index.md
+  log: wiki/log.md
+style:
+  summary_target_words: 250
+  enable_citations: true
+  use_yaml_frontmatter: true
+search:
+  default_top_k: 6
+  max_context_chars: 16000
+obsidian:
+  attachment_dir: raw/assets
+  use_wikilinks: true

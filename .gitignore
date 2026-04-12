@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.obsidian/workspace.json
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+.venv/
+__pycache__/
+*.pyc
+dist/
+build/
+*.egg-info/
+raw/.cache/
+tmp/
