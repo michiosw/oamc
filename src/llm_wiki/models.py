@@ -108,6 +108,7 @@ class QueryResult(BaseModel):
     title: str = ""
     answer_preview: str = ""
     content: str = ""
+    selected_candidates: list[str] = Field(default_factory=list)
 
 
 class LintIssue(BaseModel):

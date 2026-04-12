@@ -56,6 +56,12 @@ Drop markdown sources into `raw/inbox/`, then run the one-command daily workflow
 uv run llm-wiki process
 ```
 
+Or keep the inbox on autopilot:
+
+```bash
+uv run llm-wiki watch
+```
+
 Ask a question and get both a saved page and a terminal answer preview:
 
 ```bash
@@ -102,11 +108,20 @@ Suggested workflow:
 - Runs a lint pass
 - Leaves you with a clean wiki state
 
+`uv run llm-wiki watch`
+
+- Watches `raw/inbox/`
+- Waits for new files to settle
+- Auto-runs the same processing flow
+- Best option if you want clipping to feel automatic
+
 `uv run llm-wiki query "..."`
 
 - Searches the wiki
 - Writes a synthesis page by default
 - Prints the answer preview directly in the terminal
+- Supports `--scope` to focus on a source, concept, entity, or path fragment
+- Supports `--open` to open the saved synthesis page after writing
 
 `uv run llm-wiki status`
 

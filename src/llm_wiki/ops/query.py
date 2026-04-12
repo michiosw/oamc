@@ -16,11 +16,14 @@ def run_query(
     question: str,
     *,
     write_page: bool,
+    top_k: int | None = None,
+    scopes: list[str] | None = None,
 ) -> QueryResult:
     candidates = search_pages(
         repo_paths,
         question,
-        top_k=config.search.default_top_k,
+        top_k=top_k or config.search.default_top_k,
+        scopes=scopes or [],
     )
     contexts = load_page_contexts(
         repo_paths,
@@ -64,4 +67,5 @@ def run_query(
         title=title,
         answer_preview=answer_preview,
         content=response.page.content,
+        selected_candidates=[candidate.relative_path for candidate in candidates],
     )

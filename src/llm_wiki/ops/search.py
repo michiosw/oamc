@@ -37,10 +37,37 @@ def _score_text(query_terms: list[str], text: str, weight: float) -> float:
     return sum(lowered.count(term) for term in query_terms) * weight
 
 
-def search_pages(repo_paths: RepoPaths, query: str, top_k: int = 6) -> list[SearchCandidate]:
+def filter_candidates(candidates: list[SearchCandidate], scopes: list[str]) -> list[SearchCandidate]:
+    if not scopes:
+        return candidates
+
+    lowered_scopes = [scope.strip().lower() for scope in scopes if scope.strip()]
+    filtered: list[SearchCandidate] = []
+    for candidate in candidates:
+        haystacks = [
+            candidate.relative_path.lower(),
+            candidate.title.lower(),
+            candidate.summary.lower(),
+            link_target_for_path(candidate.relative_path).lower(),
+        ]
+        if any(scope in haystacks[0] or scope in haystacks[1] or scope in haystacks[2] or scope in haystacks[3] for scope in lowered_scopes):
+            filtered.append(candidate)
+    return filtered
+
+
+def search_pages(
+    repo_paths: RepoPaths,
+    query: str,
+    top_k: int = 6,
+    *,
+    scopes: list[str] | None = None,
+) -> list[SearchCandidate]:
     query_terms = [term for term in slugify(query).split("-") if term]
+    base_candidates = list_candidates(repo_paths)
+    if scopes:
+        base_candidates = filter_candidates(base_candidates, scopes)
     ranked: list[SearchCandidate] = []
-    for candidate in list_candidates(repo_paths):
+    for candidate in base_candidates:
         page = repo_paths.wiki_root / candidate.relative_path
         content = page.read_text(encoding="utf-8")
         score = 0.0

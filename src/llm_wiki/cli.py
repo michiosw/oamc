@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import time
 from pathlib import Path
 
 import typer
@@ -104,6 +106,56 @@ def _last_log_heading(log_path: Path) -> str | None:
     return None
 
 
+def _print_query_result(result) -> None:
+    if result.page_path:
+        typer.echo(f"Saved page: {result.page_path}")
+    typer.echo("")
+    typer.echo(f"# {result.title}")
+    typer.echo("")
+    typer.echo(result.answer_preview or "No summary answer section was generated.")
+    if result.selected_candidates:
+        typer.echo("")
+        _render_list("Context pages:", result.selected_candidates)
+    if result.touched:
+        typer.echo("")
+        _render_list("Touched files:", result.touched)
+
+
+def _open_path(base_dir: Path, relative_path: str) -> None:
+    absolute = (base_dir / "wiki" / relative_path.replace("wiki/", "")).resolve()
+    subprocess.run(["open", absolute.as_posix()], check=False)
+
+
+def _run_process_once(config, repo_paths, client, *, lint: bool) -> None:
+    inbox_paths = sorted(repo_paths.raw_inbox.glob("*"))
+    if not inbox_paths:
+        typer.echo("Inbox is empty. Nothing to process.")
+        return
+
+    ingest_result = ingest_sources(config, repo_paths, client, inbox_paths)
+    typer.echo(f"Processed inbox ({len(ingest_result.processed_sources)} source{'s' if len(ingest_result.processed_sources) != 1 else ''})")
+    _render_list("Processed sources:", ingest_result.processed_sources)
+    if ingest_result.source_pages:
+        _render_list("Source pages:", ingest_result.source_pages)
+    if lint:
+        lint_result = run_lint(config, repo_paths, client)
+        typer.echo(f"Lint complete ({len(lint_result.issues)} issues)")
+        if lint_result.normalized_pages:
+            _render_list("Normalized pages:", lint_result.normalized_pages)
+
+
+def _inbox_snapshot(repo_paths) -> tuple[tuple[str, int, int], ...]:
+    files = sorted(path for path in repo_paths.raw_inbox.glob("*") if path.is_file())
+    return tuple(
+        (
+            path.name,
+            path.stat().st_mtime_ns,
+            path.stat().st_size,
+        )
+        for path in files
+    )
+
+
 @app.command()
 def init(
     base_dir: Path = typer.Option(Path.cwd(), "--base-dir", resolve_path=True),
@@ -148,22 +200,27 @@ def query(
     question: str = typer.Argument(...),
     write_page: bool = typer.Option(True, "--write-page/--no-write-page"),
     show_answer: bool = typer.Option(True, "--show-answer/--no-show-answer"),
+    scope: list[str] = typer.Option(None, "--scope"),
+    top_k: int = typer.Option(6, "--top-k", min=1),
+    open_page: bool = typer.Option(False, "--open"),
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
     config, repo_paths = load_config(base_dir)
     client = build_client_or_exit(config)
-    result = run_query(config, repo_paths, client, question, write_page=write_page)
+    result = run_query(
+        config,
+        repo_paths,
+        client,
+        question,
+        write_page=write_page,
+        top_k=top_k,
+        scopes=scope,
+    )
     typer.echo("Query complete")
-    if result.page_path:
-        typer.echo(f"Saved page: {result.page_path}")
     if show_answer:
-        typer.echo("")
-        typer.echo(f"# {result.title}")
-        typer.echo("")
-        typer.echo(result.answer_preview or "No summary answer section was generated.")
-    if result.touched:
-        typer.echo("")
-        _render_list("Touched files:", result.touched)
+        _print_query_result(result)
+    if open_page and result.page_path:
+        _open_path(repo_paths.base_dir, result.page_path)
 
 
 @app.command()
@@ -199,14 +256,7 @@ def process(
         raise typer.Exit()
 
     client = build_client_or_exit(config)
-    ingest_result = ingest_sources(config, repo_paths, client, inbox_paths)
-    typer.echo(f"Processed inbox ({len(ingest_result.processed_sources)} source{'s' if len(ingest_result.processed_sources) != 1 else ''})")
-    _render_list("Processed sources:", ingest_result.processed_sources)
-    if lint:
-        lint_result = run_lint(config, repo_paths, client)
-        typer.echo(f"Lint complete ({len(lint_result.issues)} issues)")
-        if lint_result.normalized_pages:
-            _render_list("Normalized pages:", lint_result.normalized_pages)
+    _run_process_once(config, repo_paths, client, lint=lint)
 
 
 @app.command()
@@ -227,6 +277,39 @@ def status(
             "Inbox:",
             [repo_relative(path, repo_paths.base_dir) for path in inbox_paths],
         )
+
+
+@app.command()
+def watch(
+    lint: bool = typer.Option(True, "--lint/--no-lint"),
+    interval: float = typer.Option(2.0, "--interval", min=0.5),
+    base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
+) -> None:
+    config, repo_paths = load_config(base_dir)
+    typer.echo(f"Watching {repo_relative(repo_paths.raw_inbox, repo_paths.base_dir)} every {interval:.1f}s. Press Ctrl+C to stop.")
+
+    last_seen = _inbox_snapshot(repo_paths)
+    last_processed: tuple[tuple[str, int, int], ...] | None = None
+    pending_snapshot: tuple[tuple[str, int, int], ...] | None = last_seen or None
+    client = None
+
+    try:
+        while True:
+            snapshot = _inbox_snapshot(repo_paths)
+            if snapshot and snapshot != last_seen:
+                pending_snapshot = snapshot
+                typer.echo("Detected inbox change. Waiting for files to settle...")
+            elif snapshot and pending_snapshot is not None and snapshot == pending_snapshot and snapshot != last_processed:
+                if client is None:
+                    client = build_client_or_exit(config)
+                typer.echo("Processing inbox...")
+                _run_process_once(config, repo_paths, client, lint=lint)
+                last_processed = snapshot
+                pending_snapshot = None
+            last_seen = snapshot
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        typer.echo("Stopped watching.")
 
 
 @app.command("rebuild-index")

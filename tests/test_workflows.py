@@ -130,6 +130,36 @@ A placeholder concept page created during lint repair.
         )
 
 
+class CapturingQueryLLMClient(LLMClient):
+    def __init__(self) -> None:
+        self.last_request: QueryRequest | None = None
+
+    def ingest(self, request: IngestRequest) -> IngestResponse:
+        raise NotImplementedError
+
+    def query(self, request: QueryRequest) -> QueryResponse:
+        self.last_request = request
+        return QueryResponse(
+            page=PageDraft(
+                relative_path="syntheses/scoped-answer.md",
+                content="""---
+title: Scoped Answer
+tags:
+  - synthesis
+---
+# Scoped Answer
+
+## Summary Answer
+
+Scoped answer.
+""",
+            )
+        )
+
+    def lint(self, request: LintRequest) -> LintResponse:
+        raise NotImplementedError
+
+
 def test_cli_smoke_workflows(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
     from llm_wiki import cli
 
@@ -298,3 +328,42 @@ def test_status_command_reports_counts(temp_workspace: Path, runner: CliRunner) 
     assert result.exit_code == 0, result.output
     assert "LLM Wiki Status" in result.output
     assert "Inbox files: 0" in result.output
+
+
+def test_query_scope_filters_context(temp_workspace: Path) -> None:
+    from llm_wiki.ops.common import default_page
+    from llm_wiki.ops.query import run_query
+
+    (temp_workspace / "wiki" / "entities" / "gpt-5-4.md").write_text(
+        default_page(
+            "entities/gpt-5-4.md",
+            "GPT-5.4",
+            "# GPT-5.4\n\nA model.\n\n## Sources\n- raw/sources/example.md",
+        ),
+        encoding="utf-8",
+    )
+    (temp_workspace / "wiki" / "concepts" / "frontend-design.md").write_text(
+        default_page(
+            "concepts/frontend-design.md",
+            "Frontend Design",
+            "# Frontend Design\n\nA concept.\n\n## Sources\n- raw/sources/example.md",
+        ),
+        encoding="utf-8",
+    )
+    config, paths = load_config(temp_workspace)
+    client = CapturingQueryLLMClient()
+
+    result = run_query(
+        config,
+        paths,
+        client,
+        "Summarize GPT-5.4",
+        write_page=True,
+        scopes=["entities/gpt-5-4"],
+    )
+
+    assert result.page_path == "syntheses/scoped-answer.md"
+    assert client.last_request is not None
+    assert [candidate.relative_path for candidate in client.last_request.candidates] == [
+        "entities/gpt-5-4.md"
+    ]
