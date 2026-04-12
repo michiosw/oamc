@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from llm_wiki.obsidian import obsidian_url
+from llm_wiki.integrations.obsidian import obsidian_url
 
 
 def test_obsidian_url_uses_vault_name_and_relative_path(tmp_path: Path) -> None:

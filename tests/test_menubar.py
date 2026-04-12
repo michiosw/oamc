@@ -3,7 +3,7 @@ from __future__ import annotations
 import plistlib
 from pathlib import Path
 
-from llm_wiki import menubar
+from llm_wiki.integrations import menubar
 
 
 def test_build_launch_agent_payload(temp_workspace: Path) -> None:

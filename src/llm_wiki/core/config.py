@@ -4,9 +4,9 @@ from pathlib import Path
 
 import yaml
 
-from llm_wiki.env import load_repo_env
-from llm_wiki.models import AppConfig, CURRENT_SCHEMA_VERSION, RepoPaths
-from llm_wiki.paths import build_repo_paths, find_base_dir
+from llm_wiki.core.env import load_repo_env
+from llm_wiki.core.models import AppConfig, CURRENT_SCHEMA_VERSION, RepoPaths
+from llm_wiki.core.paths import build_repo_paths, find_base_dir
 
 
 def load_config(base_dir: Path | None = None) -> tuple[AppConfig, RepoPaths]:

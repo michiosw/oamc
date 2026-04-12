@@ -3,13 +3,13 @@ from __future__ import annotations
 from uuid import uuid4
 
 from llm_wiki.llm.base import LLMClient
-from llm_wiki.markdown import extract_section, slugify, summary_from_content, title_from_content
-from llm_wiki.models import AppConfig, QueryRequest, QueryResult, RepoPaths, ResearchTemplate
+from llm_wiki.core.markdown import extract_section, slugify, summary_from_content, title_from_content
+from llm_wiki.core.models import AppConfig, QueryRequest, QueryResult, RepoPaths, ResearchTemplate
 from llm_wiki.ops.common import append_log_entry, write_wiki_draft
 from llm_wiki.ops.rebuild_index import rebuild_index
 from llm_wiki.ops.search import load_page_contexts, search_pages
-from llm_wiki.paths import repo_relative
-from llm_wiki.telemetry import get_logger, log_event
+from llm_wiki.core.paths import repo_relative
+from llm_wiki.core.telemetry import get_logger, log_event
 
 
 LOGGER = get_logger(__name__)

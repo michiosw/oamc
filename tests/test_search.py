@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from llm_wiki.config import load_config
+from llm_wiki.core.config import load_config
 from llm_wiki.ops.common import default_page
 from llm_wiki.ops.search import list_candidates, filter_candidates, search_pages
 

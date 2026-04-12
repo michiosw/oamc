@@ -29,9 +29,10 @@ uv run llm-wiki doctor
 ## Coding standards
 
 - Prefer small, explicit modules over new abstractions.
+- Keep shared contracts and deterministic helpers in `src/llm_wiki/core/`.
 - Keep workflow logic in `src/llm_wiki/ops/`.
-- Keep runtime orchestration in `src/llm_wiki/studio.py`.
-- Keep macOS integration in `src/llm_wiki/menubar.py`.
+- Keep runtime orchestration in `src/llm_wiki/runtime/`.
+- Keep platform integration in `src/llm_wiki/integrations/`.
 - Keep the dashboard read-focused. Obsidian remains the editing surface.
 - Hard cutover only. Do not add backward compatibility layers.
 

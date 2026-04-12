@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from llm_wiki.models import IngestRequest, LintRequest, QueryRequest, SearchCandidate
+from llm_wiki.core.models import IngestRequest, LintRequest, QueryRequest, SearchCandidate
 
 QUERY_TEMPLATE_INSTRUCTIONS = {
     "synthesis": "Write a synthesis page that answers the question directly, then expands with analysis and implications.",

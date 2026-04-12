@@ -7,13 +7,13 @@ from pathlib import Path
 
 import uvicorn
 
-from llm_wiki.dashboard import create_dashboard_app
+from llm_wiki.runtime.dashboard import create_dashboard_app
 from llm_wiki.llm.base import LLMClient
-from llm_wiki.models import AppConfig, IngestResult, LintResult, RepoPaths
+from llm_wiki.core.models import AppConfig, IngestResult, LintResult, RepoPaths
 from llm_wiki.ops.ingest import ingest_sources
 from llm_wiki.ops.lint import run_lint
-from llm_wiki.paths import repo_relative
-from llm_wiki.telemetry import get_logger, log_event
+from llm_wiki.core.paths import repo_relative
+from llm_wiki.core.telemetry import get_logger, log_event
 
 
 Emitter = Callable[[str], None]

@@ -33,8 +33,22 @@ oamc/
     sources/
     syntheses/
   src/llm_wiki/
+    core/
+    integrations/
+    llm/
+    ops/
+    runtime/
+    cli.py
   tests/
 ```
+
+Package roles:
+
+- `core/` holds contracts, config, paths, health, markdown helpers, and telemetry
+- `ops/` holds the write-path workflows: ingest, query, lint, rebuild, search
+- `runtime/` holds the running app surfaces: dashboard and studio orchestration
+- `integrations/` holds platform bridges such as Obsidian and macOS menubar
+- `llm/` holds provider-facing client code
 
 ## Requirements
 

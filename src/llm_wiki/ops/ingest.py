@@ -6,13 +6,13 @@ from pathlib import Path
 from uuid import uuid4
 
 from llm_wiki.llm.base import LLMClient
-from llm_wiki.markdown import read_text, slugify
-from llm_wiki.models import AppConfig, IngestRequest, IngestResult, RepoPaths
+from llm_wiki.core.markdown import read_text, slugify
+from llm_wiki.core.models import AppConfig, IngestRequest, IngestResult, RepoPaths
 from llm_wiki.ops.common import append_log_entry, write_wiki_draft
 from llm_wiki.ops.rebuild_index import rebuild_index
 from llm_wiki.ops.search import list_candidates
-from llm_wiki.paths import repo_relative
-from llm_wiki.telemetry import get_logger, log_event
+from llm_wiki.core.paths import repo_relative
+from llm_wiki.core.telemetry import get_logger, log_event
 
 
 LOGGER = get_logger(__name__)

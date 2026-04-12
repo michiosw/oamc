@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
-from llm_wiki.markdown import link_target_for_path, load_markdown, slugify, summary_from_content
-from llm_wiki.models import RepoPaths, SearchCandidate
+from llm_wiki.core.markdown import link_target_for_path, load_markdown, slugify, summary_from_content
+from llm_wiki.core.models import RepoPaths, SearchCandidate
 
 
 WIKI_DIRS = ("sources", "entities", "concepts", "syntheses")
@@ -101,7 +101,7 @@ def load_page_contexts(
 
 
 def inbound_link_counts(repo_paths: RepoPaths) -> Counter[str]:
-    from llm_wiki.markdown import extract_wikilinks
+    from llm_wiki.core.markdown import extract_wikilinks
 
     counts: Counter[str] = Counter()
     for page in iter_wiki_pages(repo_paths):

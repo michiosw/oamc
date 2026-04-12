@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 import re
 
-from llm_wiki.markdown import (
+from llm_wiki.core.markdown import (
     dump_markdown,
     link_target_for_path,
     parse_markdown,
@@ -12,7 +12,7 @@ from llm_wiki.markdown import (
     title_from_content,
     upsert_frontmatter,
 )
-from llm_wiki.models import PageDraft, RepoPaths
+from llm_wiki.core.models import PageDraft, RepoPaths
 
 
 ALLOWED_WIKI_PREFIXES = ("sources/", "entities/", "concepts/", "syntheses/")
@@ -60,7 +60,7 @@ def normalize_draft(
 
     absolute_path = repo_paths.wiki_root / relative_path.replace("wiki/", "")
     if absolute_path.exists():
-        from llm_wiki.markdown import load_markdown
+        from llm_wiki.core.markdown import load_markdown
 
         existing_metadata, _ = load_markdown(absolute_path)
         created = existing_metadata.get("created")

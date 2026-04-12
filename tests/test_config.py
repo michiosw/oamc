@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import os
 
-from llm_wiki.config import load_config
+from llm_wiki.core.config import load_config
 
 
 def test_load_config_from_repo_root(repo_root: Path) -> None:

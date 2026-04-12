@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from llm_wiki.config import load_config
-from llm_wiki.dashboard import create_dashboard_app
-from llm_wiki.models import QueryResult
+from llm_wiki.core.config import load_config
+from llm_wiki.runtime.dashboard import create_dashboard_app
+from llm_wiki.core.models import QueryResult
 from llm_wiki.ops.common import default_page
 
 
@@ -57,7 +57,7 @@ def test_dashboard_page_view_renders_markdown_and_links(temp_workspace) -> None:
 
 
 def test_dashboard_ask_route_renders_saved_answer(temp_workspace, monkeypatch) -> None:
-    from llm_wiki import dashboard
+    from llm_wiki.runtime import dashboard
 
     (temp_workspace / "wiki" / "concepts" / "frontend-design.md").write_text(
         default_page(
@@ -99,7 +99,7 @@ def test_dashboard_ask_route_renders_saved_answer(temp_workspace, monkeypatch) -
 
 
 def test_dashboard_open_route_uses_obsidian_and_finder_actions(temp_workspace, monkeypatch) -> None:
-    from llm_wiki import dashboard
+    from llm_wiki.runtime import dashboard
 
     page = temp_workspace / "wiki" / "concepts" / "frontend-design.md"
     page.write_text(

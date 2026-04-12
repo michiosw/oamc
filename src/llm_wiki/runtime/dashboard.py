@@ -10,15 +10,15 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from markdown_it import MarkdownIt
 
-from llm_wiki.config import load_config
-from llm_wiki.health import build_doctor_report
+from llm_wiki.core.config import load_config
+from llm_wiki.core.health import build_doctor_report
 from llm_wiki.llm.openai_client import OpenAIWikiClient
-from llm_wiki.markdown import extract_wikilinks, link_target_for_path, load_markdown, parse_markdown
-from llm_wiki.models import DoctorReport, QueryResult, RESEARCH_TEMPLATES, RepoPaths, ResearchTemplate
-from llm_wiki.obsidian import open_in_obsidian, reveal_in_finder
+from llm_wiki.core.markdown import extract_wikilinks, link_target_for_path, load_markdown, parse_markdown
+from llm_wiki.core.models import DoctorReport, QueryResult, RESEARCH_TEMPLATES, RepoPaths, ResearchTemplate
+from llm_wiki.integrations.obsidian import open_in_obsidian, reveal_in_finder
 from llm_wiki.ops.query import run_query
 from llm_wiki.ops.search import iter_wiki_pages, search_pages
-from llm_wiki.paths import repo_relative
+from llm_wiki.core.paths import repo_relative
 
 
 BODY_FONT = '"Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif'

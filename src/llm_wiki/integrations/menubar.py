@@ -9,11 +9,11 @@ import threading
 from pathlib import Path
 from typing import Any, cast
 
-from llm_wiki.health import build_doctor_report
+from llm_wiki.core.health import build_doctor_report
 from llm_wiki import __version__
-from llm_wiki.config import load_config
+from llm_wiki.core.config import load_config
 from llm_wiki.llm.openai_client import OpenAIWikiClient
-from llm_wiki.studio import DashboardServer, inbox_count, latest_log_heading, run_process_once, watch_loop
+from llm_wiki.runtime.studio import DashboardServer, inbox_count, latest_log_heading, run_process_once, watch_loop
 
 
 LAUNCH_AGENT_LABEL = "dev.oamc.studio"
@@ -141,7 +141,7 @@ def _pyinstaller_entry_script(base_dir: Path) -> str:
     return "\n".join(
         [
             "from pathlib import Path",
-            "from llm_wiki.menubar import run_menubar",
+            "from llm_wiki.integrations.menubar import run_menubar",
             "",
             "if __name__ == '__main__':",
             f"    run_menubar(base_dir=Path({base_dir.resolve().as_posix()!r}))",

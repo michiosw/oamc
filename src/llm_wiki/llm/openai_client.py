@@ -5,10 +5,10 @@ from typing import TypeVar
 
 from openai import AuthenticationError, OpenAI
 
-from llm_wiki.env import api_key_issue
+from llm_wiki.core.env import api_key_issue
 
 from llm_wiki.llm.base import LLMClient
-from llm_wiki.models import (
+from llm_wiki.core.models import (
     AppConfig,
     IngestRequest,
     IngestResponse,
@@ -17,7 +17,7 @@ from llm_wiki.models import (
     QueryRequest,
     QueryResponse,
 )
-from llm_wiki.prompts import (
+from llm_wiki.core.prompts import (
     build_ingest_prompts,
     build_lint_prompts,
     build_query_prompts,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from llm_wiki.markdown import (
+from llm_wiki.core.markdown import (
     dump_markdown,
     extract_section,
     extract_wikilinks,

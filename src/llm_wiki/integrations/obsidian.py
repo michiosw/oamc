@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from urllib.parse import quote
 
-from llm_wiki.paths import repo_relative
+from llm_wiki.core.paths import repo_relative
 
 
 def vault_name(base_dir: Path) -> str:

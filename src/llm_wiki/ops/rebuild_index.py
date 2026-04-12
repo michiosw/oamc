@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from llm_wiki.markdown import link_target_for_path, load_markdown, summary_from_content
-from llm_wiki.models import RepoPaths
+from llm_wiki.core.markdown import link_target_for_path, load_markdown, summary_from_content
+from llm_wiki.core.models import RepoPaths
 from llm_wiki.ops.search import iter_wiki_pages
 
 
