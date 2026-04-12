@@ -242,15 +242,14 @@ def build_doctor_report(
         overall_status = "warn"
 
     inbox_files = [path for path in repo_paths.raw_inbox.glob("*") if path.is_file()]
-    recommended_next_step = (
-        "Inbox pending. Let the menubar watcher process it, or run llm-wiki process."
-        if inbox_files
-        else "System healthy. Clip into raw/inbox/ and ask the wiki."
-    )
-    for check in checks:
-        if check.recommendation:
-            recommended_next_step = check.recommendation
-            break
+    if inbox_files:
+        recommended_next_step = "Inbox pending. Let the menubar watcher process it, or run llm-wiki process."
+    else:
+        recommended_next_step = "System healthy. Clip into raw/inbox/ and ask the wiki."
+        for check in checks:
+            if check.recommendation:
+                recommended_next_step = check.recommendation
+                break
 
     return DoctorReport(
         checks=checks,
