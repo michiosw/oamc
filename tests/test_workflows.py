@@ -216,6 +216,45 @@ def test_ingest_with_empty_inbox_exits_cleanly(temp_workspace: Path, runner: Cli
     assert "Inbox is empty" in result.output
 
 
+def test_start_command_launches_watch_and_dashboard(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
+    from llm_wiki import cli
+
+    started: dict[str, object] = {}
+
+    class FakeThread:
+        def __init__(self, *, target, kwargs, daemon, name) -> None:
+            started["target"] = target
+            started["kwargs"] = kwargs
+            started["daemon"] = daemon
+            started["name"] = name
+
+        def start(self) -> None:
+            started["started"] = True
+
+    def fake_serve(*, host, port, open_browser, base_dir) -> None:
+        started["serve"] = {
+            "host": host,
+            "port": port,
+            "open_browser": open_browser,
+            "base_dir": base_dir,
+        }
+
+    monkeypatch.setattr(cli.threading, "Thread", FakeThread)
+    monkeypatch.setattr(cli, "serve", fake_serve)
+
+    result = runner.invoke(app, ["start", "--no-open", "--base-dir", str(temp_workspace)])
+    assert result.exit_code == 0, result.output
+    assert started["started"] is True
+    assert started["daemon"] is True
+    assert started["name"] == "llm-wiki-watch"
+    assert started["serve"] == {
+        "host": "127.0.0.1",
+        "port": 8421,
+        "open_browser": False,
+        "base_dir": temp_workspace,
+    }
+
+
 class FailingLLMClient(LLMClient):
     def ingest(self, request: IngestRequest) -> IngestResponse:
         return IngestResponse(

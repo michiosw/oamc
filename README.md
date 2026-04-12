@@ -56,7 +56,19 @@ Drop markdown sources into `raw/inbox/`, then run the one-command daily workflow
 uv run llm-wiki process
 ```
 
-Or keep the inbox on autopilot:
+For the best day-to-day setup, run the studio command and leave it open:
+
+```bash
+uv run llm-wiki start
+```
+
+That gives you:
+
+- a local dashboard in the browser
+- automatic inbox processing in the background
+- one place to browse, search, and ask questions
+
+If you only want inbox automation without the dashboard:
 
 ```bash
 uv run llm-wiki watch
@@ -121,6 +133,13 @@ Suggested workflow:
 - Auto-runs the same processing flow
 - Best option if you want clipping to feel automatic
 
+`uv run llm-wiki start`
+
+- Starts the local dashboard
+- Starts the inbox watcher in the same session
+- Opens the browser by default
+- Best default command if you want the system to feel like one app
+
 `uv run llm-wiki query "..."`
 
 - Searches the wiki
@@ -138,6 +157,7 @@ Suggested workflow:
 `uv run llm-wiki serve`
 
 - Starts a local dashboard for search and browsing
+- Lets you ask the wiki directly from the browser
 - Opens the wiki in your browser by default
 - Keeps the presentation clean and minimal
 

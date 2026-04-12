@@ -9,8 +9,11 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from markdown_it import MarkdownIt
 
+from llm_wiki.config import load_config
+from llm_wiki.llm.openai_client import OpenAIWikiClient
 from llm_wiki.markdown import extract_wikilinks, link_target_for_path, load_markdown, parse_markdown
 from llm_wiki.models import RepoPaths
+from llm_wiki.ops.query import run_query
 from llm_wiki.ops.search import iter_wiki_pages, search_pages
 
 
@@ -45,6 +48,29 @@ def create_dashboard_app(repo_paths: RepoPaths) -> FastAPI:
         body = render_page(repo_paths, target)
         return render_layout(relative_path, body)
 
+    @app.get("/ask", response_class=HTMLResponse)
+    def ask(q: str = Query(""), scope: str = Query("")) -> str:
+        question = q.strip()
+        if not question:
+            return render_layout("Ask", render_ask_form())
+
+        config, _ = load_config(repo_paths.base_dir)
+        scopes = [item.strip() for item in scope.split(",") if item.strip()]
+        try:
+            result = run_query(
+                config,
+                repo_paths,
+                OpenAIWikiClient(config),
+                question,
+                write_page=True,
+                top_k=config.search.default_top_k,
+                scopes=scopes,
+            )
+            body = render_ask_result(question, scope, result)
+        except RuntimeError as exc:
+            body = render_ask_error(question, scope, str(exc))
+        return render_layout(f"Ask: {question}", body, q=question)
+
     return app
 
 
@@ -77,8 +103,9 @@ def render_home(repo_paths: RepoPaths) -> str:
     <section class="hero">
       <p class="eyebrow">Local wiki workspace</p>
       <h1>Browse the knowledge base without leaving the repo.</h1>
-      <p class="lede">Use search to jump into pages, or start with the most recent notes and syntheses.</p>
+      <p class="lede">Clip into the inbox, let the watcher process it, then ask the wiki directly here.</p>
     </section>
+    {render_ask_form()}
     <section class="stats">{stat_html}</section>
     <section class="split">
       <div>
@@ -89,8 +116,23 @@ def render_home(repo_paths: RepoPaths) -> str:
         <h2>Workspace status</h2>
         <p class="meta-line">Inbox files: <strong>{inbox_count}</strong></p>
         <p class="meta-line">Vault root: <code>{escape(repo_paths.base_dir.as_posix())}</code></p>
-        <p class="meta-line">Use <code>uv run llm-wiki watch</code> if you want new clips processed automatically.</p>
+        <p class="meta-line">Use <code>uv run llm-wiki start</code> if you want the dashboard and inbox watch running together.</p>
       </div>
+    </section>
+    """
+
+
+def render_ask_form(question: str = "", scope: str = "") -> str:
+    return f"""
+    <section class="ask-panel">
+      <p class="eyebrow">Ask the wiki</p>
+      <h2>Write once, save the answer, keep moving.</h2>
+      <form action="/ask" method="get" class="ask-form">
+        <input type="search" name="q" value="{escape(question)}" placeholder="What does the wiki currently know about..." required>
+        <input type="text" name="scope" value="{escape(scope)}" placeholder="Optional scope: gpt-5-4, frontend-design">
+        <button type="submit">Ask</button>
+      </form>
+      <p class="helper">Every question writes a synthesis page and updates the wiki index automatically.</p>
     </section>
     """
 
@@ -116,6 +158,47 @@ def render_search(repo_paths: RepoPaths, query: str) -> str:
       <p class="eyebrow">Search</p>
       <h1>{escape(query)}</h1>
       <ul class="result-list">{''.join(items)}</ul>
+    </section>
+    """
+
+
+def render_ask_result(question: str, scope: str, result) -> str:
+    context_html = "".join(f"<li>{escape(candidate)}</li>" for candidate in result.selected_candidates) or "<li>No context pages were selected.</li>"
+    saved_html = (
+        f'<p class="meta-line">Saved to <a href="/page/{escape(result.page_path)}">{escape(result.page_path)}</a></p>'
+        if result.page_path
+        else ""
+    )
+    return f"""
+    {render_ask_form(question, scope)}
+    <section class="answer-panel">
+      <p class="eyebrow">Answer</p>
+      <h1>{escape(result.title)}</h1>
+      {saved_html}
+      <div class="answer-copy">{render_markdown(result.answer_preview)}</div>
+    </section>
+    <section class="split">
+      <div>
+        <h2>Context pages</h2>
+        <ul class="link-list">{context_html}</ul>
+      </div>
+      <div>
+        <h2>What happened</h2>
+        <p class="meta-line">The answer was saved back into <code>wiki/syntheses/</code>.</p>
+        <p class="meta-line">Open the saved page in Obsidian if you want to keep exploring from there.</p>
+      </div>
+    </section>
+    """
+
+
+def render_ask_error(question: str, scope: str, message: str) -> str:
+    return f"""
+    {render_ask_form(question, scope)}
+    <section class="answer-panel">
+      <p class="eyebrow">Query failed</p>
+      <h1>Could not ask the wiki yet.</h1>
+      <p class="lede">{escape(message)}</p>
+      <p class="meta-line">Check your <code>.env</code> file and make sure <code>OPENAI_API_KEY</code> is set.</p>
     </section>
     """
 
@@ -305,11 +388,33 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
       gap: 12px;
     }}
+    .ask-panel,
+    .answer-panel,
     .stat {{
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 18px;
       padding: 18px;
+    }}
+    .ask-form {{
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+      margin-top: 20px;
+    }}
+    .ask-form input[type="search"],
+    .ask-form input[type="text"] {{
+      width: 100%;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 16px;
+      padding: 12px 16px;
+      font: inherit;
+    }}
+    .helper {{
+      color: var(--muted);
+      margin: 12px 0 0;
     }}
     .stat-label {{
       color: var(--muted);
@@ -374,6 +479,9 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
     .markdown-body {{
       font-size: 1.05rem;
     }}
+    .answer-copy {{
+      font-size: 1.05rem;
+    }}
     .markdown-body h1, .markdown-body h2, .markdown-body h3 {{
       font-family: {DISPLAY_FONT};
       letter-spacing: -0.02em;
@@ -395,6 +503,7 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
     @media (max-width: 860px) {{
       header, .split {{ grid-template-columns: 1fr; display: grid; }}
       form {{ min-width: 0; }}
+      .ask-form {{ grid-template-columns: 1fr; }}
       .shell {{ padding: 24px 18px 48px; }}
     }}
   </style>

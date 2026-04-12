@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 import time
 import webbrowser
 from pathlib import Path
@@ -145,6 +146,28 @@ def _run_process_once(config, repo_paths, client, *, lint: bool) -> None:
         typer.echo(f"Lint complete ({len(lint_result.issues)} issues)")
         if lint_result.normalized_pages:
             _render_list("Normalized pages:", lint_result.normalized_pages)
+
+
+def _watch_loop(config, repo_paths, *, lint: bool, interval: float) -> None:
+    last_seen = _inbox_snapshot(repo_paths)
+    last_processed: tuple[tuple[str, int, int], ...] | None = None
+    pending_snapshot: tuple[tuple[str, int, int], ...] | None = last_seen or None
+    client = None
+
+    while True:
+        snapshot = _inbox_snapshot(repo_paths)
+        if snapshot and snapshot != last_seen:
+            pending_snapshot = snapshot
+            typer.echo("Detected inbox change. Waiting for files to settle...")
+        elif snapshot and pending_snapshot is not None and snapshot == pending_snapshot and snapshot != last_processed:
+            if client is None:
+                client = build_client_or_exit(config)
+            typer.echo("Processing inbox...")
+            _run_process_once(config, repo_paths, client, lint=lint)
+            last_processed = snapshot
+            pending_snapshot = None
+        last_seen = snapshot
+        time.sleep(interval)
 
 
 def _inbox_snapshot(repo_paths) -> tuple[tuple[str, int, int], ...]:
@@ -299,6 +322,39 @@ def serve(
 
 
 @app.command()
+def start(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8421, "--port", min=1, max=65535),
+    interval: float = typer.Option(2.0, "--interval", min=0.5),
+    lint: bool = typer.Option(True, "--lint/--no-lint"),
+    open_browser: bool = typer.Option(True, "--open/--no-open"),
+    base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
+) -> None:
+    config, repo_paths = load_config(base_dir)
+    typer.echo("Starting oamc studio")
+    typer.echo(f"- Dashboard: http://{host}:{port}")
+    typer.echo(f"- Inbox watch: {repo_relative(repo_paths.raw_inbox, repo_paths.base_dir)}")
+    watch_thread = threading.Thread(
+        target=_watch_loop,
+        kwargs={
+            "config": config,
+            "repo_paths": repo_paths,
+            "lint": lint,
+            "interval": interval,
+        },
+        daemon=True,
+        name="llm-wiki-watch",
+    )
+    watch_thread.start()
+    serve(
+        host=host,
+        port=port,
+        open_browser=open_browser,
+        base_dir=repo_paths.base_dir,
+    )
+
+
+@app.command()
 def watch(
     lint: bool = typer.Option(True, "--lint/--no-lint"),
     interval: float = typer.Option(2.0, "--interval", min=0.5),
@@ -307,26 +363,8 @@ def watch(
     config, repo_paths = load_config(base_dir)
     typer.echo(f"Watching {repo_relative(repo_paths.raw_inbox, repo_paths.base_dir)} every {interval:.1f}s. Press Ctrl+C to stop.")
 
-    last_seen = _inbox_snapshot(repo_paths)
-    last_processed: tuple[tuple[str, int, int], ...] | None = None
-    pending_snapshot: tuple[tuple[str, int, int], ...] | None = last_seen or None
-    client = None
-
     try:
-        while True:
-            snapshot = _inbox_snapshot(repo_paths)
-            if snapshot and snapshot != last_seen:
-                pending_snapshot = snapshot
-                typer.echo("Detected inbox change. Waiting for files to settle...")
-            elif snapshot and pending_snapshot is not None and snapshot == pending_snapshot and snapshot != last_processed:
-                if client is None:
-                    client = build_client_or_exit(config)
-                typer.echo("Processing inbox...")
-                _run_process_once(config, repo_paths, client, lint=lint)
-                last_processed = snapshot
-                pending_snapshot = None
-            last_seen = snapshot
-            time.sleep(interval)
+        _watch_loop(config, repo_paths, lint=lint, interval=interval)
     except KeyboardInterrupt:
         typer.echo("Stopped watching.")
 
