@@ -6,6 +6,8 @@ This repo is designed for a single user working in one vault. The wiki is the ar
 
 This is now structured as an open-source-ready project: schema versioned, type-checked, CI-backed, and intentionally narrow in its write path.
 
+The product code is open source. Your live vault content is local by default and intentionally ignored by git.
+
 ## What this ships
 
 - A git-backed Obsidian-friendly vault layout
@@ -13,6 +15,12 @@ This is now structured as an open-source-ready project: schema versioned, type-c
 - A strict schema for how the wiki is maintained
 - Built-in local retrieval based on `wiki/index.md` plus text scoring
 - Ingest, query, lint, and index rebuild workflows
+
+## Inspirations
+
+`oamc` is directly inspired by Andrej Karpathy's April 2026 "LLM Knowledge Bases" / "LLM Wiki" posts and follow-up idea file, which framed the core `raw/ -> wiki/ -> query` pattern for LLM-maintained knowledge bases.
+
+It also borrows its dashboard visual direction from OpenAI's "Designing delightful frontends with GPT-5.4" design language: calm editorial typography, restrained surfaces, sparse copy, and subtle motion instead of generic SaaS chrome.
 
 ## Repository layout
 
@@ -66,6 +74,8 @@ export OPENAI_API_KEY=...
 uv run llm-wiki init
 ```
 
+`llm-wiki init` bootstraps the local workspace files that are intentionally not tracked in git, including `wiki/index.md` and `wiki/log.md`.
+
 Drop markdown sources into `raw/inbox/`, then run the one-command daily workflow:
 
 ```bash
@@ -116,6 +126,16 @@ Check repo health any time:
 ```bash
 uv run llm-wiki doctor
 ```
+
+## Git hygiene
+
+The repository tracks product code, config, tests, and docs. It does not track your live research corpus by default.
+
+- `raw/inbox/`, `raw/sources/`, and `raw/assets/` are ignored except for directory keep files
+- `wiki/concepts/`, `wiki/entities/`, `wiki/sources/`, and `wiki/syntheses/` are ignored except for directory keep files
+- `wiki/index.md` and `wiki/log.md` are local runtime artifacts and are ignored too
+
+That means your personal clips, generated pages, and local syntheses stay on disk but do not get swept into normal open-source commits unless you intentionally override that policy.
 
 If you only want inbox automation without the dashboard:
 
