@@ -78,8 +78,11 @@ uv run llm-wiki install-menubar
 That gives you:
 
 - an `oamc` icon in the macOS menu bar
-- the watcher and dashboard always running
+- a real `~/Applications/oamc.app` bundle
+- the watcher and dashboard always running under macOS supervision
 - a one-click way to open the dashboard, Obsidian, or process the inbox manually
+
+When you update `oamc`, run `uv run llm-wiki install-menubar` again once to refresh the installed app bundle.
 
 If you only want inbox automation without the dashboard:
 

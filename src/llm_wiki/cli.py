@@ -372,14 +372,16 @@ def install_menubar_command(
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
     _, repo_paths = load_config(base_dir)
-    agent_path = install_launch_agent(repo_paths.base_dir)
+    agent_path, app_path = install_launch_agent(repo_paths.base_dir)
+    typer.echo(f"Installed macOS app at {app_path}")
     typer.echo(f"Installed menubar login item at {agent_path}")
 
 
 @app.command("uninstall-menubar")
 def uninstall_menubar_command() -> None:
-    agent_path = uninstall_launch_agent()
+    agent_path, app_path = uninstall_launch_agent()
     typer.echo(f"Removed menubar login item at {agent_path}")
+    typer.echo(f"Removed macOS app at {app_path}")
 
 
 @app.command("rebuild-index")

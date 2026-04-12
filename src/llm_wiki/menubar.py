@@ -2,17 +2,27 @@ from __future__ import annotations
 
 import os
 import plistlib
+import shutil
 import subprocess
 import sys
 import threading
 from pathlib import Path
 
+from llm_wiki import __version__
 from llm_wiki.config import load_config
 from llm_wiki.llm.openai_client import OpenAIWikiClient
 from llm_wiki.studio import DashboardServer, inbox_count, latest_log_heading, run_process_once, watch_loop
 
 
 LAUNCH_AGENT_LABEL = "dev.oamc.studio"
+APP_NAME = "oamc"
+APP_BUNDLE_NAME = f"{APP_NAME}.app"
+APP_BUNDLE_ID = "dev.oamc.studio"
+
+
+def app_bundle_path(home: Path | None = None) -> Path:
+    root = (home or Path.home()).expanduser()
+    return root / "Applications" / APP_BUNDLE_NAME
 
 
 def launch_agent_path(home: Path | None = None) -> Path:
@@ -20,51 +30,160 @@ def launch_agent_path(home: Path | None = None) -> Path:
     return root / "Library" / "LaunchAgents" / f"{LAUNCH_AGENT_LABEL}.plist"
 
 
-def build_launch_agent_payload(base_dir: Path, *, python_executable: str | None = None) -> dict[str, object]:
-    python_path = python_executable or sys.executable
-    log_dir = base_dir / ".oamc"
-    stdout_log = log_dir / "menubar.log"
-    stderr_log = log_dir / "menubar.error.log"
+def build_launch_agent_payload(app_path: Path, *, base_dir: Path) -> dict[str, object]:
+    executable_path = (app_path / "Contents" / "MacOS" / APP_NAME).as_posix()
     return {
         "Label": LAUNCH_AGENT_LABEL,
-        "ProgramArguments": [
-            python_path,
-            "-m",
-            "llm_wiki.cli",
-            "menubar",
-            "--base-dir",
-            base_dir.as_posix(),
-        ],
+        "ProgramArguments": [executable_path],
         "WorkingDirectory": base_dir.as_posix(),
         "RunAtLoad": True,
-        "KeepAlive": True,
+        "KeepAlive": {"SuccessfulExit": False},
+        "LimitLoadToSessionType": "Aqua",
         "ProcessType": "Interactive",
-        "StandardOutPath": stdout_log.as_posix(),
-        "StandardErrorPath": stderr_log.as_posix(),
-        "EnvironmentVariables": {
-            "PATH": os.environ.get("PATH", ""),
-        },
     }
 
 
-def install_launch_agent(base_dir: Path) -> Path:
+def build_app_bundle(
+    base_dir: Path,
+    *,
+    target_path: Path | None = None,
+    python_executable: str | None = None,
+) -> Path:
+    bundle_path = (target_path or app_bundle_path()).expanduser().resolve()
+    build_root = (base_dir / ".oamc" / "pyinstaller").resolve()
+    dist_dir = build_root / "dist"
+    work_dir = build_root / "build"
+    spec_dir = build_root / "spec"
+    entry_script = build_root / "oamc_menubar_entry.py"
+
+    if bundle_path.exists():
+        shutil.rmtree(bundle_path)
+
+    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    build_root.mkdir(parents=True, exist_ok=True)
+
+    python_path = _resolve_python_executable(base_dir, python_executable)
+    entry_script.write_text(_pyinstaller_entry_script(base_dir), encoding="utf-8")
+    subprocess.run(
+        [
+            python_path,
+            "-m",
+            "PyInstaller",
+            "--windowed",
+            "--noconfirm",
+            "--clean",
+            "--name",
+            APP_NAME,
+            "--distpath",
+            dist_dir.as_posix(),
+            "--workpath",
+            work_dir.as_posix(),
+            "--specpath",
+            spec_dir.as_posix(),
+            "--osx-bundle-identifier",
+            APP_BUNDLE_ID,
+            "--paths",
+            (base_dir / "src").as_posix(),
+            "--hidden-import",
+            "rumps",
+            "--hidden-import",
+            "AppKit",
+            "--hidden-import",
+            "Foundation",
+            entry_script.as_posix(),
+        ],
+        check=True,
+    )
+    built_app = dist_dir / APP_BUNDLE_NAME
+    shutil.copytree(built_app, bundle_path)
+
+    contents_dir = bundle_path / "Contents"
+
+    info_path = contents_dir / "Info.plist"
+    existing_info = plistlib.loads(info_path.read_bytes()) if info_path.exists() else {}
+    existing_info.update(
+        {
+        "CFBundleDevelopmentRegion": "en",
+        "CFBundleDisplayName": APP_NAME,
+        "CFBundleInfoDictionaryVersion": "6.0",
+        "CFBundleIdentifier": APP_BUNDLE_ID,
+        "CFBundleName": APP_NAME,
+        "CFBundleShortVersionString": __version__,
+        "CFBundleVersion": __version__,
+        "LSUIElement": True,
+        "NSHighResolutionCapable": True,
+        }
+    )
+    info_path.write_bytes(plistlib.dumps(existing_info))
+    (contents_dir / "PkgInfo").write_text("APPL????", encoding="utf-8")
+    return bundle_path
+
+
+def _resolve_python_executable(base_dir: Path, python_executable: str | None) -> str:
+    if python_executable:
+        return python_executable
+    venv_python = base_dir / ".venv" / "bin" / "python3"
+    if venv_python.exists():
+        return venv_python.as_posix()
+    virtual_env = os.environ.get("VIRTUAL_ENV")
+    if virtual_env:
+        candidate = Path(virtual_env) / "bin" / "python3"
+        if candidate.exists():
+            return candidate.as_posix()
+    return sys.executable
+
+
+def _pyinstaller_entry_script(base_dir: Path) -> str:
+    return "\n".join(
+        [
+            "from pathlib import Path",
+            "from llm_wiki.menubar import run_menubar",
+            "",
+            "if __name__ == '__main__':",
+            f"    run_menubar(base_dir=Path({base_dir.resolve().as_posix()!r}))",
+            "",
+        ]
+    )
+
+
+def install_launch_agent(base_dir: Path) -> tuple[Path, Path]:
+    _terminate_existing_app()
+    _run_launchctl(["bootout", f"gui/{os.getuid()}", launch_agent_path().as_posix()], check=False)
+    app_path = build_app_bundle(base_dir)
     agent_path = launch_agent_path()
     agent_path.parent.mkdir(parents=True, exist_ok=True)
     (base_dir / ".oamc").mkdir(parents=True, exist_ok=True)
-    payload = build_launch_agent_payload(base_dir)
+    payload = build_launch_agent_payload(app_path, base_dir=base_dir)
     agent_path.write_bytes(plistlib.dumps(payload))
-    _run_launchctl(["bootout", f"gui/{os.getuid()}", agent_path.as_posix()], check=False)
     _run_launchctl(["bootstrap", f"gui/{os.getuid()}", agent_path.as_posix()], check=True)
     _run_launchctl(["kickstart", "-k", f"gui/{os.getuid()}/{LAUNCH_AGENT_LABEL}"], check=False)
-    return agent_path
+    return agent_path, app_path
 
 
-def uninstall_launch_agent() -> Path:
+def uninstall_launch_agent() -> tuple[Path, Path]:
     agent_path = launch_agent_path()
+    app_path = app_bundle_path()
     if agent_path.exists():
         _run_launchctl(["bootout", f"gui/{os.getuid()}", agent_path.as_posix()], check=False)
         agent_path.unlink()
-    return agent_path
+    _terminate_existing_app()
+    if app_path.exists():
+        shutil.rmtree(app_path)
+    return agent_path, app_path
+
+
+def _terminate_existing_app() -> None:
+    subprocess.run(
+        [
+            "osascript",
+            "-e",
+            f'tell application id "{APP_BUNDLE_ID}" to quit',
+        ],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(["pkill", "-x", APP_NAME], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def _run_launchctl(args: list[str], *, check: bool) -> None:
@@ -98,9 +217,9 @@ def run_menubar(
 
     def notify(message: str) -> None:
         if message.startswith("Processed inbox"):
-            rumps.notification("oamc", "Ingest complete", message)
+            rumps.notification(APP_NAME, "Ingest complete", message)
         elif message.startswith("Missing required environment variable"):
-            rumps.notification("oamc", "Configuration issue", message)
+            rumps.notification(APP_NAME, "Configuration issue", message)
 
     watcher = threading.Thread(
         target=watch_loop,
@@ -121,7 +240,7 @@ def run_menubar(
 
     class OAMCMenuBar(rumps.App):
         def __init__(self) -> None:
-            super().__init__("oamc", quit_button=None)
+            super().__init__(APP_NAME, quit_button=None)
             self.menu = [
                 "Status",
                 None,
@@ -133,7 +252,7 @@ def run_menubar(
                 None,
                 "Quit oamc",
             ]
-            self.title = "oamc"
+            self.title = APP_NAME
             self._status_item = self.menu["Status"]
             self._status_item.set_callback(None)
             self._timer = rumps.Timer(self.refresh, 5)
@@ -143,7 +262,7 @@ def run_menubar(
         def refresh(self, _sender) -> None:
             pending = inbox_count(repo_paths)
             heading = latest_log_heading(repo_paths) or "No activity yet"
-            self.title = f"oamc · {pending}" if pending else "oamc"
+            self.title = f"{APP_NAME} · {pending}" if pending else APP_NAME
             self._status_item.title = f"Inbox: {pending} · {heading}"
 
         @rumps.clicked("Open Dashboard")
@@ -167,7 +286,7 @@ def run_menubar(
                             emit=notify,
                         )
                 except RuntimeError as exc:
-                    rumps.notification("oamc", "Configuration issue", str(exc))
+                    rumps.notification(APP_NAME, "Configuration issue", str(exc))
                 finally:
                     self.refresh(None)
 
