@@ -3,11 +3,14 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+import webbrowser
 from pathlib import Path
 
 import typer
+import uvicorn
 
 from llm_wiki.config import load_config, write_default_config
+from llm_wiki.dashboard import create_dashboard_app
 from llm_wiki.llm.base import LLMClient
 from llm_wiki.llm.openai_client import OpenAIWikiClient
 from llm_wiki.ops.ingest import ingest_sources
@@ -277,6 +280,22 @@ def status(
             "Inbox:",
             [repo_relative(path, repo_paths.base_dir) for path in inbox_paths],
         )
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8421, "--port", min=1, max=65535),
+    open_browser: bool = typer.Option(True, "--open/--no-open"),
+    base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
+) -> None:
+    _, repo_paths = load_config(base_dir)
+    app_instance = create_dashboard_app(repo_paths)
+    url = f"http://{host}:{port}"
+    typer.echo(f"Serving wiki dashboard at {url}")
+    if open_browser:
+        webbrowser.open(url)
+    uvicorn.run(app_instance, host=host, port=port, log_level="warning")
 
 
 @app.command()

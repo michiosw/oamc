@@ -4,12 +4,14 @@ from pathlib import Path
 
 import yaml
 
+from llm_wiki.env import load_repo_env
 from llm_wiki.models import AppConfig, RepoPaths
 from llm_wiki.paths import build_repo_paths, find_base_dir
 
 
 def load_config(base_dir: Path | None = None) -> tuple[AppConfig, RepoPaths]:
     resolved_base_dir = find_base_dir(base_dir)
+    load_repo_env(resolved_base_dir)
     config_path = resolved_base_dir / "config" / "config.yaml"
     if not config_path.exists():
         raise FileNotFoundError(f"Config not found at {config_path}")

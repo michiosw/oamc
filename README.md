@@ -74,6 +74,12 @@ Check current state any time:
 uv run llm-wiki status
 ```
 
+Launch the local dashboard:
+
+```bash
+uv run llm-wiki serve
+```
+
 ## Obsidian setup
 
 Open the repo root as an Obsidian vault.
@@ -128,6 +134,12 @@ Suggested workflow:
 - Shows inbox count
 - Shows wiki page count
 - Shows the latest log entry
+
+`uv run llm-wiki serve`
+
+- Starts a local dashboard for search and browsing
+- Opens the wiki in your browser by default
+- Keeps the presentation clean and minimal
 
 `uv run llm-wiki ingest`
 
