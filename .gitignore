@@ -6,6 +6,7 @@
 .ruff_cache/
 .coverage
 coverage.xml
+.oamc/
 .venv/
 __pycache__/
 *.pyc

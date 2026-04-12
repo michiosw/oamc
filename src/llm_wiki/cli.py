@@ -3,23 +3,22 @@ from __future__ import annotations
 import os
 import subprocess
 import threading
-import time
 import webbrowser
 from pathlib import Path
 
 import typer
-import uvicorn
 
 from llm_wiki.config import load_config, write_default_config
-from llm_wiki.dashboard import create_dashboard_app
 from llm_wiki.llm.base import LLMClient
 from llm_wiki.llm.openai_client import OpenAIWikiClient
+from llm_wiki.menubar import install_launch_agent, run_menubar, uninstall_launch_agent
 from llm_wiki.ops.ingest import ingest_sources
 from llm_wiki.ops.lint import run_lint
 from llm_wiki.ops.query import run_query
 from llm_wiki.ops.rebuild_index import rebuild_index
 from llm_wiki.ops.search import iter_wiki_pages
 from llm_wiki.paths import ensure_structure, repo_relative
+from llm_wiki.studio import DashboardServer, run_process_once, watch_loop
 
 
 app = typer.Typer(help="Maintain a local-first markdown wiki with an LLM.")
@@ -130,56 +129,8 @@ def _open_path(base_dir: Path, relative_path: str) -> None:
     subprocess.run(["open", absolute.as_posix()], check=False)
 
 
-def _run_process_once(config, repo_paths, client, *, lint: bool) -> None:
-    inbox_paths = sorted(repo_paths.raw_inbox.glob("*"))
-    if not inbox_paths:
-        typer.echo("Inbox is empty. Nothing to process.")
-        return
-
-    ingest_result = ingest_sources(config, repo_paths, client, inbox_paths)
-    typer.echo(f"Processed inbox ({len(ingest_result.processed_sources)} source{'s' if len(ingest_result.processed_sources) != 1 else ''})")
-    _render_list("Processed sources:", ingest_result.processed_sources)
-    if ingest_result.source_pages:
-        _render_list("Source pages:", ingest_result.source_pages)
-    if lint:
-        lint_result = run_lint(config, repo_paths, client)
-        typer.echo(f"Lint complete ({len(lint_result.issues)} issues)")
-        if lint_result.normalized_pages:
-            _render_list("Normalized pages:", lint_result.normalized_pages)
-
-
-def _watch_loop(config, repo_paths, *, lint: bool, interval: float) -> None:
-    last_seen = _inbox_snapshot(repo_paths)
-    last_processed: tuple[tuple[str, int, int], ...] | None = None
-    pending_snapshot: tuple[tuple[str, int, int], ...] | None = last_seen or None
-    client = None
-
-    while True:
-        snapshot = _inbox_snapshot(repo_paths)
-        if snapshot and snapshot != last_seen:
-            pending_snapshot = snapshot
-            typer.echo("Detected inbox change. Waiting for files to settle...")
-        elif snapshot and pending_snapshot is not None and snapshot == pending_snapshot and snapshot != last_processed:
-            if client is None:
-                client = build_client_or_exit(config)
-            typer.echo("Processing inbox...")
-            _run_process_once(config, repo_paths, client, lint=lint)
-            last_processed = snapshot
-            pending_snapshot = None
-        last_seen = snapshot
-        time.sleep(interval)
-
-
-def _inbox_snapshot(repo_paths) -> tuple[tuple[str, int, int], ...]:
-    files = sorted(path for path in repo_paths.raw_inbox.glob("*") if path.is_file())
-    return tuple(
-        (
-            path.name,
-            path.stat().st_mtime_ns,
-            path.stat().st_size,
-        )
-        for path in files
-    )
+def _emit(message: str) -> None:
+    typer.echo(message)
 
 
 @app.command()
@@ -282,7 +233,15 @@ def process(
         raise typer.Exit()
 
     client = build_client_or_exit(config)
-    _run_process_once(config, repo_paths, client, lint=lint)
+    ingest_result, lint_result = run_process_once(config, repo_paths, client, lint=lint, emit=_emit)
+    if ingest_result.source_pages:
+        _render_list("Source pages:", ingest_result.source_pages)
+    if ingest_result.entity_pages:
+        _render_list("Entity pages:", ingest_result.entity_pages)
+    if ingest_result.concept_pages:
+        _render_list("Concept pages:", ingest_result.concept_pages)
+    if lint_result and lint_result.normalized_pages:
+        _render_list("Normalized pages:", lint_result.normalized_pages)
 
 
 @app.command()
@@ -313,12 +272,17 @@ def serve(
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
     _, repo_paths = load_config(base_dir)
-    app_instance = create_dashboard_app(repo_paths)
-    url = f"http://{host}:{port}"
+    server = DashboardServer(repo_paths, host=host, port=port)
+    url = server.url
     typer.echo(f"Serving wiki dashboard at {url}")
     if open_browser:
         webbrowser.open(url)
-    uvicorn.run(app_instance, host=host, port=port, log_level="warning")
+    server.start()
+    try:
+        while True:
+            threading.Event().wait(3600)
+    except KeyboardInterrupt:
+        server.stop()
 
 
 @app.command()
@@ -335,12 +299,14 @@ def start(
     typer.echo(f"- Dashboard: http://{host}:{port}")
     typer.echo(f"- Inbox watch: {repo_relative(repo_paths.raw_inbox, repo_paths.base_dir)}")
     watch_thread = threading.Thread(
-        target=_watch_loop,
+        target=watch_loop,
         kwargs={
             "config": config,
             "repo_paths": repo_paths,
+            "client_factory": lambda: build_client(config),
             "lint": lint,
             "interval": interval,
+            "emit": _emit,
         },
         daemon=True,
         name="llm-wiki-watch",
@@ -364,9 +330,56 @@ def watch(
     typer.echo(f"Watching {repo_relative(repo_paths.raw_inbox, repo_paths.base_dir)} every {interval:.1f}s. Press Ctrl+C to stop.")
 
     try:
-        _watch_loop(config, repo_paths, lint=lint, interval=interval)
+        watch_loop(
+            config,
+            repo_paths,
+            client_factory=lambda: build_client(config),
+            lint=lint,
+            interval=interval,
+            emit=_emit,
+        )
     except KeyboardInterrupt:
         typer.echo("Stopped watching.")
+
+
+@app.command()
+def menubar(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8421, "--port", min=1, max=65535),
+    interval: float = typer.Option(2.0, "--interval", min=0.5),
+    lint: bool = typer.Option(True, "--lint/--no-lint"),
+    open_browser: bool = typer.Option(False, "--open/--no-open"),
+    base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
+) -> None:
+    try:
+        run_menubar(
+            base_dir=base_dir,
+            host=host,
+            port=port,
+            interval=interval,
+            lint=lint,
+            open_browser=open_browser,
+        )
+    except ModuleNotFoundError as exc:
+        if exc.name == "rumps":
+            typer.echo("Missing optional dependency: rumps. Run `uv sync` to install the menubar app dependencies.")
+            raise typer.Exit(code=1) from exc
+        raise
+
+
+@app.command("install-menubar")
+def install_menubar_command(
+    base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
+) -> None:
+    _, repo_paths = load_config(base_dir)
+    agent_path = install_launch_agent(repo_paths.base_dir)
+    typer.echo(f"Installed menubar login item at {agent_path}")
+
+
+@app.command("uninstall-menubar")
+def uninstall_menubar_command() -> None:
+    agent_path = uninstall_launch_agent()
+    typer.echo(f"Removed menubar login item at {agent_path}")
 
 
 @app.command("rebuild-index")

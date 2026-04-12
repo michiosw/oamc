@@ -68,6 +68,19 @@ That gives you:
 - automatic inbox processing in the background
 - one place to browse, search, and ask questions
 
+On macOS, the better setup is the menubar app. Install it once and let it launch at login:
+
+```bash
+uv sync
+uv run llm-wiki install-menubar
+```
+
+That gives you:
+
+- an `oamc` icon in the macOS menu bar
+- the watcher and dashboard always running
+- a one-click way to open the dashboard, Obsidian, or process the inbox manually
+
 If you only want inbox automation without the dashboard:
 
 ```bash
@@ -139,6 +152,18 @@ Suggested workflow:
 - Starts the inbox watcher in the same session
 - Opens the browser by default
 - Best default command if you want the system to feel like one app
+
+`uv run llm-wiki menubar`
+
+- Starts the macOS menubar app directly
+- Runs the dashboard and inbox watcher in the background
+- Best option if you want `oamc` living in the menu bar instead of a terminal tab
+
+`uv run llm-wiki install-menubar`
+
+- Installs the macOS login item
+- Launches the menubar app automatically after login
+- Removes the need to start `oamc` manually
 
 `uv run llm-wiki query "..."`
 
