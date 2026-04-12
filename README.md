@@ -1,45 +1,33 @@
 # oamc
 
-`oamc` is a local-first LLM wiki project: raw sources go in, a maintained markdown wiki comes out, and Obsidian is the UI for browsing the result.
+## About
 
-This repo is designed for a single user working in one vault. The wiki is the artifact. The LLM does the bookkeeping: source summaries, concept pages, entity pages, synthesis pages, backlinks, index updates, and log entries.
+`oamc` is a local-first LLM wiki for research workflows.
 
-This is now structured as an open-source-ready project: schema versioned, type-checked, CI-backed, and intentionally narrow in its write path.
+Raw sources go into `raw/`, the system compiles them into a maintained markdown wiki in `wiki/`, and Obsidian is the main reading/editing surface. The app layer adds a CLI, a local dashboard, and a macOS menubar runtime.
 
-The product code is open source. Your live vault content is local by default and intentionally ignored by git.
-
-## What this ships
-
-- A git-backed Obsidian-friendly vault layout
-- A Python CLI, `llm-wiki`
-- A strict schema for how the wiki is maintained
-- Built-in local retrieval based on `wiki/index.md` plus text scoring
-- Ingest, query, lint, and index rebuild workflows
+This repo is for the product code. Your live vault content stays local by default and is intentionally ignored by git.
 
 ## Inspirations
 
-`oamc` is directly inspired by Andrej Karpathy's April 4, 2026 X thread on LLM knowledge bases and the follow-up "LLM Wiki" idea file, which framed the core `raw/ -> wiki/ -> query` pattern for LLM-maintained knowledge bases.
+- Andrej Karpathy's April 4, 2026 X thread on LLM knowledge bases and the follow-up "LLM Wiki" idea file
+- [`wiki-os`](https://github.com/Ansub/wiki-os) for the local wiki-app and dashboard direction
 
-The dashboard and local wiki-app direction also take inspiration from [`wiki-os`](https://github.com/Ansub/wiki-os): a clean, local-first browsing surface for an Obsidian-style knowledge base.
+## What It Ships
 
-## Repository layout
+- `llm-wiki`, a Python CLI
+- a strict `raw/ -> wiki/` knowledge pipeline
+- ingest, query, lint, status, doctor, watch, and process workflows
+- a local dashboard for search, browse, and research prompts
+- a macOS menubar app for always-on use
+
+## Repository Shape
 
 ```text
 oamc/
   config/
-    config.yaml
-    schema.md
   raw/
-    inbox/
-    sources/
-    assets/
   wiki/
-    index.md
-    log.md
-    concepts/
-    entities/
-    sources/
-    syntheses/
   src/llm_wiki/
     core/
     integrations/
@@ -50,22 +38,13 @@ oamc/
   tests/
 ```
 
-Package roles:
-
 - `core/` holds contracts, config, paths, health, markdown helpers, and telemetry
-- `ops/` holds the write-path workflows: ingest, query, lint, rebuild, search
-- `runtime/` holds the running app surfaces: dashboard and studio orchestration
-- `integrations/` holds platform bridges such as Obsidian and macOS menubar
+- `ops/` holds the write-path workflows
+- `runtime/` holds the dashboard and studio runtime
+- `integrations/` holds Obsidian and macOS bridges
 - `llm/` holds provider-facing client code
 
-## Requirements
-
-- Python 3.12+
-- `uv`
-- An OpenAI API key in `OPENAI_API_KEY`
-- Obsidian for browsing the vault
-
-## Quick start
+## Quick Start
 
 ```bash
 uv sync
@@ -74,196 +53,54 @@ export OPENAI_API_KEY=...
 uv run llm-wiki init
 ```
 
-`llm-wiki init` bootstraps the local workspace files that are intentionally not tracked in git, including `wiki/index.md` and `wiki/log.md`.
-
-Drop markdown sources into `raw/inbox/`, then run the one-command daily workflow:
+Recommended daily setup on macOS:
 
 ```bash
-uv run llm-wiki process
-```
-
-For the best day-to-day setup, run the studio command and leave it open:
-
-```bash
-uv run llm-wiki start
-```
-
-That gives you:
-
-- a local dashboard in the browser
-- automatic inbox processing in the background
-- one place to browse, search, and ask questions
-
-On macOS, the better setup is the menubar app. Install it once and let it launch at login:
-
-```bash
-uv sync
 uv run llm-wiki install-menubar
 ```
 
-That gives you:
+That installs `oamc.app`, keeps the watcher and dashboard running, and removes the need to start the tool manually.
 
-- an `oamc` icon in the macOS menu bar
-- a real `~/Applications/oamc.app` bundle
-- the watcher and dashboard always running under macOS supervision
-- a one-click way to open the dashboard, Obsidian, or process the inbox manually
+## Daily Flow
 
-When you update `oamc`, run `uv run llm-wiki install-menubar` again once to refresh the installed app bundle.
+1. Clip a source into `raw/inbox/`
+2. Let the watcher process it, or run `uv run llm-wiki process`
+3. Review the generated pages in Obsidian
+4. Ask a research question with `uv run llm-wiki query "..." --template synthesis`
 
-## Open source quality gates
-
-The repo is kept lean on purpose, but it has hard quality gates:
-
-- `uv run pytest`
-- `python3 -m compileall src tests`
-- `uv run mypy src`
-- `uv run llm-wiki doctor`
-
-The schema contract is versioned in both `config/config.yaml` and `config/schema.md`. Hard cutover applies: when the schema version changes, refresh those files from the repo instead of maintaining compatibility shims.
-
-Check repo health any time:
+Useful commands:
 
 ```bash
+uv run llm-wiki process
+uv run llm-wiki query "What does the wiki currently know about X?"
+uv run llm-wiki status
 uv run llm-wiki doctor
 ```
 
-## Git hygiene
+## Local Data Policy
 
-The repository tracks product code, config, tests, and docs. It does not track your live research corpus by default.
+This repository tracks product code, config, tests, and docs.
 
-- `raw/inbox/`, `raw/sources/`, and `raw/assets/` are ignored except for directory keep files
-- `wiki/concepts/`, `wiki/entities/`, `wiki/sources/`, and `wiki/syntheses/` are ignored except for directory keep files
-- `wiki/index.md` and `wiki/log.md` are local runtime artifacts and are ignored too
+It does not track your live research corpus by default:
 
-That means your personal clips, generated pages, and local syntheses stay on disk but do not get swept into normal open-source commits unless you intentionally override that policy.
+- `raw/inbox/`, `raw/sources/`, and `raw/assets/` stay local
+- generated `wiki/` pages stay local
+- `wiki/index.md` and `wiki/log.md` stay local
 
-If you only want inbox automation without the dashboard:
+That keeps personal sources, syntheses, and vault activity out of normal open-source commits.
 
-```bash
-uv run llm-wiki watch
-```
-
-Ask a question and get both a saved page and a terminal answer preview:
+## Quality Gates
 
 ```bash
-uv run llm-wiki query "What does the wiki currently know about prompt engineering and frontend design?"
-uv run llm-wiki query "Compare the strongest ideas in the wiki about frontend design." --template compare
+uv run pytest
+uv run mypy src
+python3 -m compileall src tests
+uv run llm-wiki doctor
 ```
-
-Check current state any time:
-
-```bash
-uv run llm-wiki status
-```
-
-Launch the local dashboard:
-
-```bash
-uv run llm-wiki serve
-```
-
-## Obsidian setup
-
-Open the repo root as an Obsidian vault.
-
-Recommended settings:
-
-- Set attachment folder path to `raw/assets/`
-- Enable wikilinks
-- Keep graph view enabled
-
-Recommended plugins:
-
-- Obsidian Web Clipper
-- Dataview
-- Marp
-
-Suggested workflow:
-
-1. Clip a source into `raw/inbox/`
-2. Download its images into `raw/assets/` if needed
-3. Run `uv run llm-wiki process`
-4. Review the new wiki pages in Obsidian
-5. Ask research questions with `uv run llm-wiki query "..." --template synthesis`
-6. Commit product code, config, tests, and docs when you change the tool itself. Leave `raw/` and `wiki/` local by default.
-
-## Daily commands
-
-`uv run llm-wiki process`
-
-- Processes everything currently in `raw/inbox/`
-- Rebuilds the index
-- Runs a lint pass
-- Leaves you with a clean wiki state
-
-`uv run llm-wiki watch`
-
-- Watches `raw/inbox/`
-- Waits for new files to settle
-- Auto-runs the same processing flow
-- Best option if you want clipping to feel automatic
-
-`uv run llm-wiki start`
-
-- Starts the local dashboard
-- Starts the inbox watcher in the same session
-- Opens the browser by default
-- Best default command if you want the system to feel like one app
-
-`uv run llm-wiki menubar`
-
-- Starts the macOS menubar app directly
-- Runs the dashboard and inbox watcher in the background
-- Best option if you want `oamc` living in the menu bar instead of a terminal tab
-
-`uv run llm-wiki install-menubar`
-
-- Installs the macOS login item
-- Launches the menubar app automatically after login
-- Removes the need to start `oamc` manually
-
-`uv run llm-wiki query "..."`
-
-- Searches the wiki
-- Writes a synthesis page by default
-- Prints the answer preview directly in the terminal
-- Supports `--template` for research-oriented answer shapes
-- Supports `--scope` to focus on a source, concept, entity, or path fragment
-- Supports `--open` to open the saved synthesis page after writing
-
-`uv run llm-wiki status`
-
-- Shows inbox count
-- Shows wiki page count
-- Shows the latest log entry
-- Shows health status and the next recommended action
-
-`uv run llm-wiki doctor`
-
-- Runs deterministic health checks
-- Warns about stray `Clippings/` markdown
-- Checks index drift, page metadata, log formatting, API key status, and runtime reachability
-
-`uv run llm-wiki serve`
-
-- Starts a local dashboard for search and browsing
-- Lets you ask the wiki directly from the browser
-- Opens the wiki in your browser by default
-- Keeps the presentation clean and minimal
-
-`uv run llm-wiki ingest`
-
-- Lower-level command when you only want ingest behavior
-
-`uv run llm-wiki lint`
-
-- Lower-level maintenance command when you want cleanup without new ingest
 
 ## Notes
 
-- `raw/` is immutable input. The CLI only moves files from `raw/inbox/` to `raw/sources/` after successful ingest.
-- `wiki/` is LLM-maintained output.
-- `wiki/index.md` is the first file the agent should consult for retrieval.
-- `wiki/log.md` is the append-only operations log.
-- `raw/inbox/` is the only supported clipping destination. `Clippings/` is outside the pipeline and flagged by `llm-wiki doctor`.
-- `CONTRIBUTING.md` and `SECURITY.md` are the source of truth for contributor workflow and disclosure.
+- `raw/inbox/` is the only supported clipping destination
+- `raw/` is immutable input; successful ingest moves files from `raw/inbox/` to `raw/sources/`
+- `wiki/` is the maintained knowledge layer
+- `CONTRIBUTING.md` and `SECURITY.md` are the source of truth for contributor workflow and disclosure
