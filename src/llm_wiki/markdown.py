@@ -8,6 +8,7 @@ import frontmatter
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 
 def slugify(value: str) -> str:
@@ -32,7 +33,7 @@ def upsert_frontmatter(
     *,
     created: str | None = None,
 ) -> str:
-    post = frontmatter.loads(content)
+    post = parse_markdown(content)
     metadata = dict(post.metadata)
     if created and "created" not in metadata:
         metadata["created"] = created
@@ -60,7 +61,7 @@ def link_target_for_path(relative_path: str) -> str:
 
 
 def title_from_content(content: str, fallback: str) -> str:
-    post = frontmatter.loads(content)
+    post = parse_markdown(content)
     title = post.metadata.get("title")
     if isinstance(title, str) and title.strip():
         return title.strip()
@@ -72,7 +73,7 @@ def title_from_content(content: str, fallback: str) -> str:
 
 
 def summary_from_content(content: str, fallback: str = "") -> str:
-    post = frontmatter.loads(content)
+    post = parse_markdown(content)
     for paragraph in post.content.split("\n\n"):
         cleaned = paragraph.strip()
         if not cleaned or cleaned.startswith("#") or cleaned.startswith("## Sources"):
@@ -83,3 +84,18 @@ def summary_from_content(content: str, fallback: str = "") -> str:
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def parse_markdown(content: str) -> frontmatter.Post:
+    try:
+        return frontmatter.loads(content)
+    except Exception:
+        stripped = strip_frontmatter_block(content)
+        return frontmatter.Post(stripped.strip())
+
+
+def strip_frontmatter_block(content: str) -> str:
+    match = FRONTMATTER_RE.match(content)
+    if match:
+        return content[match.end() :]
+    return content

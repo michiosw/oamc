@@ -208,3 +208,63 @@ def test_ingest_does_not_move_source_on_failure(temp_workspace: Path) -> None:
 
     assert source_path.exists()
     assert not any((temp_workspace / "raw" / "sources").iterdir())
+
+
+class MalformedQueryLLMClient(LLMClient):
+    def ingest(self, request: IngestRequest) -> IngestResponse:
+        raise NotImplementedError
+
+    def query(self, request: QueryRequest) -> QueryResponse:
+        return QueryResponse(
+            page=PageDraft(
+                relative_path="syntheses/bad-frontmatter.md",
+                content="""---
+title: Summary: GPT-5.4 and frontend design
+tags:
+  - synthesis
+---
+# GPT-5.4 and Frontend Design
+
+## Summary Answer
+
+The wiki currently emphasizes prompt quality, design systems, and tool use.
+
+## Sources
+- [[sources/20260412-designing-delightful-frontends-with-gpt-5-4]]
+""",
+            ),
+            notes="Wrote a synthesis page with malformed frontmatter.",
+        )
+
+    def lint(self, request: LintRequest) -> LintResponse:
+        raise NotImplementedError
+
+
+def test_query_recovers_from_malformed_frontmatter(temp_workspace: Path) -> None:
+    from llm_wiki.ops.common import default_page
+    from llm_wiki.ops.query import run_query
+
+    (temp_workspace / "wiki" / "sources" / "20260412-designing-delightful-frontends-with-gpt-5-4.md").write_text(
+        default_page(
+            "sources/20260412-designing-delightful-frontends-with-gpt-5-4.md",
+            "Designing delightful frontends with GPT-5.4",
+            "# Summary\n\nA source page.\n\n## Sources\n- raw/sources/example.md",
+        ),
+        encoding="utf-8",
+    )
+    config, paths = load_config(temp_workspace)
+
+    touched = run_query(
+        config,
+        paths,
+        MalformedQueryLLMClient(),
+        "Summarize what the wiki currently knows about GPT-5.4 and frontend design.",
+        write_page=True,
+    )
+
+    synthesis_path = temp_workspace / "wiki" / "syntheses" / "bad-frontmatter.md"
+    content = synthesis_path.read_text(encoding="utf-8")
+    assert synthesis_path.exists()
+    assert "title: GPT-5.4 and Frontend Design" in content
+    assert content.count("## Sources") == 1
+    assert "syntheses/bad-frontmatter.md" in touched

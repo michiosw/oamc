@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+import re
 
 from llm_wiki.markdown import (
     dump_markdown,
@@ -25,12 +26,11 @@ def today_stamp() -> str:
 
 
 def ensure_default_sources_section(content: str, source_refs: list[str]) -> str:
-    if "\n## Sources\n" in content or content.rstrip().endswith("## Sources"):
-        return content.strip() + "\n"
+    normalized = re.sub(r"\n## Sources\n.*$", "", content.strip(), flags=re.DOTALL)
     lines = ["## Sources"]
     for source in source_refs:
         lines.append(f"- {source}")
-    return content.strip() + "\n\n" + "\n".join(lines) + "\n"
+    return normalized + "\n\n" + "\n".join(lines) + "\n"
 
 
 def page_type_from_relative_path(relative_path: str) -> str:
