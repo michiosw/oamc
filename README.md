@@ -20,7 +20,7 @@ The product code is open source. Your live vault content is local by default and
 
 `oamc` is directly inspired by Andrej Karpathy's April 4, 2026 X thread on LLM knowledge bases and the follow-up "LLM Wiki" idea file, which framed the core `raw/ -> wiki/ -> query` pattern for LLM-maintained knowledge bases.
 
-It also borrows its dashboard visual direction from OpenAI's "Designing delightful frontends with GPT-5.4" design language: calm editorial typography, restrained surfaces, sparse copy, and subtle motion instead of generic SaaS chrome.
+The dashboard and local wiki-app direction also take inspiration from [`wiki-os`](https://github.com/Ansub/wiki-os): a clean, local-first browsing surface for an Obsidian-style knowledge base.
 
 ## Repository layout
 
