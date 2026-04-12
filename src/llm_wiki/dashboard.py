@@ -4,6 +4,7 @@ from datetime import datetime
 from html import escape
 import re
 from pathlib import Path
+from typing import cast
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -13,7 +14,7 @@ from llm_wiki.config import load_config
 from llm_wiki.health import build_doctor_report
 from llm_wiki.llm.openai_client import OpenAIWikiClient
 from llm_wiki.markdown import extract_wikilinks, link_target_for_path, load_markdown, parse_markdown
-from llm_wiki.models import RESEARCH_TEMPLATES, RepoPaths
+from llm_wiki.models import DoctorReport, QueryResult, RESEARCH_TEMPLATES, RepoPaths, ResearchTemplate
 from llm_wiki.obsidian import open_in_obsidian, reveal_in_finder
 from llm_wiki.ops.query import run_query
 from llm_wiki.ops.search import iter_wiki_pages, search_pages
@@ -54,9 +55,9 @@ def create_dashboard_app(repo_paths: RepoPaths) -> FastAPI:
     @app.get("/ask", response_class=HTMLResponse)
     def ask(q: str = Query(""), scope: str = Query(""), template: str = Query("synthesis")) -> str:
         question = q.strip()
-        template = template if template in RESEARCH_TEMPLATES else "synthesis"
+        template_name = cast(ResearchTemplate, template if template in RESEARCH_TEMPLATES else "synthesis")
         if not question:
-            return render_layout("Ask", render_ask_form(template=template))
+            return render_layout("Ask", render_ask_form(template=template_name))
 
         config, _ = load_config(repo_paths.base_dir)
         scopes = [item.strip() for item in scope.split(",") if item.strip()]
@@ -67,13 +68,13 @@ def create_dashboard_app(repo_paths: RepoPaths) -> FastAPI:
                 OpenAIWikiClient(config),
                 question,
                 write_page=True,
-                template=template,
+                template=template_name,
                 top_k=config.search.default_top_k,
                 scopes=scopes,
             )
-            body = render_ask_result(repo_paths, question, scope, template, result)
+            body = render_ask_result(repo_paths, question, scope, template_name, result)
         except RuntimeError as exc:
-            body = render_ask_error(question, scope, template, str(exc))
+            body = render_ask_error(question, scope, template_name, str(exc))
         return render_layout(f"Ask: {question}", body, q=question)
 
     @app.get("/open")
@@ -216,7 +217,13 @@ def render_search(repo_paths: RepoPaths, query: str) -> str:
     """
 
 
-def render_ask_result(repo_paths: RepoPaths, question: str, scope: str, template: str, result) -> str:
+def render_ask_result(
+    repo_paths: RepoPaths,
+    question: str,
+    scope: str,
+    template: str,
+    result: QueryResult,
+) -> str:
     context_html = "".join(f"<li>{escape(candidate)}</li>" for candidate in result.selected_candidates) or "<li>No context pages were selected.</li>"
     saved_html = (
         f'<p class="meta-line">Saved to <a href="/page/{escape(result.page_path)}">{escape(result.page_path)}</a></p>'
@@ -311,13 +318,13 @@ def extract_preview_line(body: str) -> str:
             continue
         if stripped in {"---", "***"}:
             continue
-        return stripped
+        return str(stripped)
     return ""
 
 
 def render_markdown(body: str) -> str:
     linked = WIKILINK_RE.sub(_wikilink_replacer, body)
-    return MD.render(linked)
+    return str(MD.render(linked))
 
 
 def _wikilink_replacer(match: re.Match[str]) -> str:
@@ -364,7 +371,7 @@ def render_template_label(template: str) -> str:
     return template.replace("-", " ").title()
 
 
-def render_health_surface(repo_paths: RepoPaths, report, inbox_count: int) -> str:
+def render_health_surface(repo_paths: RepoPaths, report: DoctorReport, inbox_count: int) -> str:
     clippings_note = ""
     if report.clippings_files:
         clippings_note = (
@@ -388,7 +395,7 @@ def render_health_surface(repo_paths: RepoPaths, report, inbox_count: int) -> st
     """
 
 
-def render_latest_ingest(repo_paths: RepoPaths, report) -> str:
+def render_latest_ingest(repo_paths: RepoPaths, report: DoctorReport) -> str:
     entry = report.latest_ingest
     if not entry:
         return ""

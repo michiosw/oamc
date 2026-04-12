@@ -5,6 +5,7 @@ import subprocess
 import threading
 import webbrowser
 from pathlib import Path
+from typing import cast
 
 import typer
 
@@ -13,7 +14,7 @@ from llm_wiki.health import build_doctor_report
 from llm_wiki.llm.base import LLMClient
 from llm_wiki.llm.openai_client import OpenAIWikiClient
 from llm_wiki.menubar import install_launch_agent, run_menubar, uninstall_launch_agent
-from llm_wiki.models import RESEARCH_TEMPLATES
+from llm_wiki.models import AppConfig, DoctorReport, LintResult, QueryResult, RESEARCH_TEMPLATES, RepoPaths, ResearchTemplate
 from llm_wiki.obsidian import open_in_obsidian
 from llm_wiki.ops.ingest import ingest_sources
 from llm_wiki.ops.lint import run_lint
@@ -22,9 +23,11 @@ from llm_wiki.ops.rebuild_index import rebuild_index
 from llm_wiki.ops.search import iter_wiki_pages
 from llm_wiki.paths import ensure_structure, repo_relative
 from llm_wiki.studio import DashboardServer, run_process_once, watch_loop
+from llm_wiki.telemetry import configure_logging, get_logger, log_event
 
 
 app = typer.Typer(help="Maintain a local-first markdown wiki with an LLM.")
+LOGGER = get_logger(__name__)
 
 MIT_LICENSE = """MIT License
 
@@ -50,11 +53,11 @@ SOFTWARE.
 """
 
 
-def build_client(config) -> LLMClient:
+def build_client(config: AppConfig) -> LLMClient:
     return OpenAIWikiClient(config)
 
 
-def build_client_or_exit(config) -> LLMClient:
+def build_client_or_exit(config: AppConfig) -> LLMClient:
     try:
         return build_client(config)
     except RuntimeError as exc:
@@ -87,7 +90,7 @@ def initialize_workspace(base_dir: Path) -> None:
         write_default_config(base_dir)
     _write_if_missing(
         base_dir / "config" / "schema.md",
-        "# LLM Wiki Schema\n\nKeep wiki pages structured and linked.\n",
+        "# LLM Wiki Schema\n\nSchema version: `1`\n\nKeep wiki pages structured and linked.\n",
     )
     _write_if_missing(
         base_dir / "wiki" / "index.md",
@@ -112,7 +115,7 @@ def _last_log_heading(log_path: Path) -> str | None:
     return None
 
 
-def _print_query_result(result) -> None:
+def _print_query_result(result: QueryResult) -> None:
     if result.page_path:
         typer.echo(f"Saved page: {result.page_path}")
     typer.echo(f"Template: {result.template}")
@@ -133,7 +136,7 @@ def _open_path(base_dir: Path, relative_path: str) -> None:
     open_in_obsidian(base_dir, absolute)
 
 
-def _print_doctor_report(report) -> None:
+def _print_doctor_report(report: DoctorReport) -> None:
     typer.echo("Doctor report")
     typer.echo(f"- Overall: {report.overall_status}")
     if report.latest_processed_source:
@@ -152,14 +155,24 @@ def _emit(message: str) -> None:
 
 
 def _exit_on_runtime_error(exc: RuntimeError) -> None:
+    log_event(LOGGER, "command_runtime_error", error=str(exc))
     typer.echo(str(exc))
     raise typer.Exit(code=1) from exc
+
+
+def load_config_or_exit(base_dir: Path | None) -> tuple[AppConfig, RepoPaths]:
+    try:
+        return load_config(base_dir)
+    except (RuntimeError, FileNotFoundError) as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
 
 
 @app.command()
 def init(
     base_dir: Path = typer.Option(Path.cwd(), "--base-dir", resolve_path=True),
 ) -> None:
+    log_event(LOGGER, "command_started", command="init", base_dir=base_dir.resolve())
     initialize_workspace(base_dir.resolve())
     typer.echo(f"Initialized LLM wiki workspace at {base_dir.resolve()}")
 
@@ -170,7 +183,8 @@ def ingest(
     lint: bool = typer.Option(False, "--lint/--no-lint"),
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
-    config, repo_paths = load_config(base_dir)
+    config, repo_paths = load_config_or_exit(base_dir)
+    log_event(LOGGER, "command_started", command="ingest", base_dir=repo_paths.base_dir)
     paths = source_paths or sorted(repo_paths.raw_inbox.glob("*"))
     if not paths:
         typer.echo("Inbox is empty. Drop files into raw/inbox/ first.")
@@ -212,7 +226,9 @@ def query(
     if template not in RESEARCH_TEMPLATES:
         typer.echo(f"Unsupported template: {template}. Choose from: {', '.join(RESEARCH_TEMPLATES)}")
         raise typer.Exit(code=1)
-    config, repo_paths = load_config(base_dir)
+    template_name = cast(ResearchTemplate, template)
+    config, repo_paths = load_config_or_exit(base_dir)
+    log_event(LOGGER, "command_started", command="query", base_dir=repo_paths.base_dir, template=template_name)
     client = build_client_or_exit(config)
     try:
         result = run_query(
@@ -221,7 +237,7 @@ def query(
             client,
             question,
             write_page=write_page,
-            template=template,
+            template=template_name,
             top_k=top_k,
             scopes=scope,
         )
@@ -238,7 +254,8 @@ def query(
 def lint(
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
-    config, repo_paths = load_config(base_dir)
+    config, repo_paths = load_config_or_exit(base_dir)
+    log_event(LOGGER, "command_started", command="lint", base_dir=repo_paths.base_dir)
     client = build_client_or_exit(config)
     try:
         result = run_lint(config, repo_paths, client)
@@ -256,7 +273,8 @@ def process(
     lint: bool = typer.Option(True, "--lint/--no-lint"),
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
-    config, repo_paths = load_config(base_dir)
+    config, repo_paths = load_config_or_exit(base_dir)
+    log_event(LOGGER, "command_started", command="process", base_dir=repo_paths.base_dir, lint=lint)
     inbox_paths = sorted(repo_paths.raw_inbox.glob("*"))
     if not inbox_paths:
         typer.echo("Inbox is empty. Nothing to process.")
@@ -270,8 +288,9 @@ def process(
         raise typer.Exit()
 
     client = build_client_or_exit(config)
+    process_lint_result: LintResult | None
     try:
-        ingest_result, lint_result = run_process_once(config, repo_paths, client, lint=lint, emit=_emit)
+        ingest_result, process_lint_result = run_process_once(config, repo_paths, client, lint=lint, emit=_emit)
     except RuntimeError as exc:
         _exit_on_runtime_error(exc)
     if ingest_result.source_pages:
@@ -280,15 +299,16 @@ def process(
         _render_list("Entity pages:", ingest_result.entity_pages)
     if ingest_result.concept_pages:
         _render_list("Concept pages:", ingest_result.concept_pages)
-    if lint_result and lint_result.normalized_pages:
-        _render_list("Normalized pages:", lint_result.normalized_pages)
+    if process_lint_result and process_lint_result.normalized_pages:
+        _render_list("Normalized pages:", process_lint_result.normalized_pages)
 
 
 @app.command()
 def status(
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
-    config, repo_paths = load_config(base_dir)
+    config, repo_paths = load_config_or_exit(base_dir)
+    log_event(LOGGER, "command_started", command="status", base_dir=repo_paths.base_dir)
     inbox_paths = sorted(repo_paths.raw_inbox.glob("*"))
     total_pages = len(iter_wiki_pages(repo_paths))
     report = build_doctor_report(config, repo_paths)
@@ -314,7 +334,8 @@ def doctor(
     port: int = typer.Option(8421, "--port", min=1, max=65535),
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
-    config, repo_paths = load_config(base_dir)
+    config, repo_paths = load_config_or_exit(base_dir)
+    log_event(LOGGER, "command_started", command="doctor", base_dir=repo_paths.base_dir, host=host, port=port)
     report = build_doctor_report(config, repo_paths, host=host, port=port)
     _print_doctor_report(report)
 
@@ -326,7 +347,8 @@ def serve(
     open_browser: bool = typer.Option(True, "--open/--no-open"),
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
-    _, repo_paths = load_config(base_dir)
+    _, repo_paths = load_config_or_exit(base_dir)
+    log_event(LOGGER, "command_started", command="serve", base_dir=repo_paths.base_dir, host=host, port=port)
     server = DashboardServer(repo_paths, host=host, port=port)
     url = server.url
     typer.echo(f"Serving wiki dashboard at {url}")
@@ -349,7 +371,8 @@ def start(
     open_browser: bool = typer.Option(True, "--open/--no-open"),
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
-    config, repo_paths = load_config(base_dir)
+    config, repo_paths = load_config_or_exit(base_dir)
+    log_event(LOGGER, "command_started", command="start", base_dir=repo_paths.base_dir, host=host, port=port)
     typer.echo("Starting oamc studio")
     typer.echo(f"- Dashboard: http://{host}:{port}")
     typer.echo(f"- Inbox watch: {repo_relative(repo_paths.raw_inbox, repo_paths.base_dir)}")
@@ -381,7 +404,8 @@ def watch(
     interval: float = typer.Option(2.0, "--interval", min=0.5),
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
-    config, repo_paths = load_config(base_dir)
+    config, repo_paths = load_config_or_exit(base_dir)
+    log_event(LOGGER, "command_started", command="watch", base_dir=repo_paths.base_dir, interval=interval)
     typer.echo(f"Watching {repo_relative(repo_paths.raw_inbox, repo_paths.base_dir)} every {interval:.1f}s. Press Ctrl+C to stop.")
 
     try:
@@ -409,6 +433,7 @@ def menubar(
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
     try:
+        log_event(LOGGER, "command_started", command="menubar", base_dir=base_dir or Path.cwd(), host=host, port=port)
         run_menubar(
             base_dir=base_dir,
             host=host,
@@ -428,7 +453,8 @@ def menubar(
 def install_menubar_command(
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
-    _, repo_paths = load_config(base_dir)
+    _, repo_paths = load_config_or_exit(base_dir)
+    log_event(LOGGER, "command_started", command="install-menubar", base_dir=repo_paths.base_dir)
     agent_path, app_path = install_launch_agent(repo_paths.base_dir)
     typer.echo(f"Installed macOS app at {app_path}")
     typer.echo(f"Installed menubar login item at {agent_path}")
@@ -436,6 +462,7 @@ def install_menubar_command(
 
 @app.command("uninstall-menubar")
 def uninstall_menubar_command() -> None:
+    log_event(LOGGER, "command_started", command="uninstall-menubar")
     agent_path, app_path = uninstall_launch_agent()
     typer.echo(f"Removed menubar login item at {agent_path}")
     typer.echo(f"Removed macOS app at {app_path}")
@@ -445,10 +472,12 @@ def uninstall_menubar_command() -> None:
 def rebuild_index_command(
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
-    _, repo_paths = load_config(base_dir)
+    _, repo_paths = load_config_or_exit(base_dir)
+    log_event(LOGGER, "command_started", command="rebuild-index", base_dir=repo_paths.base_dir)
     rebuild_index(repo_paths)
     typer.echo(f"Rebuilt {repo_paths.index}")
 
 
 def main() -> None:
+    configure_logging()
     app()

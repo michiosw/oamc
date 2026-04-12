@@ -5,6 +5,16 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+CURRENT_SCHEMA_VERSION = 1
+
+ResearchTemplate = Literal[
+    "synthesis",
+    "compare",
+    "timeline",
+    "open-questions",
+    "decision-brief",
+]
+
 RESEARCH_TEMPLATES = (
     "synthesis",
     "compare",
@@ -40,6 +50,7 @@ class ObsidianConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
+    schema_version: int = CURRENT_SCHEMA_VERSION
     model_provider: Literal["openai"] = "openai"
     model_name: str = "gpt-4.1"
     openai_api_key_env: str = "OPENAI_API_KEY"
@@ -95,11 +106,12 @@ class IngestResult(BaseModel):
     source_pages: list[str] = Field(default_factory=list)
     entity_pages: list[str] = Field(default_factory=list)
     concept_pages: list[str] = Field(default_factory=list)
+    operation_id: str = ""
 
 
 class QueryRequest(BaseModel):
     question: str
-    template: Literal["synthesis", "compare", "timeline", "open-questions", "decision-brief"] = "synthesis"
+    template: ResearchTemplate = "synthesis"
     schema_text: str
     index_text: str
     candidates: list[SearchCandidate] = Field(default_factory=list)
@@ -119,6 +131,7 @@ class QueryResult(BaseModel):
     content: str = ""
     template: str = "synthesis"
     selected_candidates: list[str] = Field(default_factory=list)
+    operation_id: str = ""
 
 
 class LintIssue(BaseModel):
@@ -144,6 +157,7 @@ class LintResult(BaseModel):
     issues: list[LintIssue] = Field(default_factory=list)
     touched: list[str] = Field(default_factory=list)
     normalized_pages: list[str] = Field(default_factory=list)
+    operation_id: str = ""
 
 
 class HealthCheck(BaseModel):

@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 from llm_wiki.env import load_repo_env
-from llm_wiki.models import AppConfig, RepoPaths
+from llm_wiki.models import AppConfig, CURRENT_SCHEMA_VERSION, RepoPaths
 from llm_wiki.paths import build_repo_paths, find_base_dir
 
 
@@ -18,6 +18,11 @@ def load_config(base_dir: Path | None = None) -> tuple[AppConfig, RepoPaths]:
 
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     config = AppConfig.model_validate(raw)
+    if config.schema_version != CURRENT_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Unsupported config schema version {config.schema_version}. "
+            f"Expected {CURRENT_SCHEMA_VERSION}. Refresh config/config.yaml from the repo."
+        )
     config.base_dir = resolved_base_dir.as_posix()
     paths = build_repo_paths(resolved_base_dir, config)
     return config, paths

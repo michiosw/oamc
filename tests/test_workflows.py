@@ -21,6 +21,10 @@ from llm_wiki.ops.ingest import ingest_sources
 from llm_wiki.config import load_config
 
 
+def read_fixture(path: Path, name: str) -> str:
+    return (path / "tests" / "fixtures" / "golden" / name).read_text(encoding="utf-8")
+
+
 class FakeLLMClient(LLMClient):
     def ingest(self, request: IngestRequest) -> IngestResponse:
         return IngestResponse(
@@ -496,3 +500,61 @@ def test_query_scope_filters_context(temp_workspace: Path) -> None:
     assert [candidate.relative_path for candidate in client.last_request.candidates] == [
         "entities/gpt-5-4.md"
     ]
+
+
+def test_ingest_matches_golden_source_page(temp_workspace: Path, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import llm_wiki.ops.common as common
+    import llm_wiki.ops.ingest as ingest_module
+
+    monkeypatch.setattr(common, "now_iso", lambda: "2026-04-12T12:00:00+00:00")
+    monkeypatch.setattr(
+        ingest_module,
+        "_planned_storage_destination",
+        lambda repo_paths, source_path: repo_paths.raw_sources / "20260412-sample-note.md",
+    )
+
+    source_path = temp_workspace / "raw" / "inbox" / "sample-note.md"
+    source_path.write_text("# Sample Note\n", encoding="utf-8")
+    config, paths = load_config(temp_workspace)
+
+    ingest_sources(config, paths, FakeLLMClient(), [source_path])
+
+    actual = (temp_workspace / "wiki" / "sources" / "20260412-sample-note.md").read_text(encoding="utf-8")
+    expected = read_fixture(repo_root, "ingest_source_page.md")
+    assert actual == expected
+
+
+def test_query_matches_golden_synthesis_page(temp_workspace: Path, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import llm_wiki.ops.common as common
+    from llm_wiki.ops.query import run_query
+
+    monkeypatch.setattr(common, "now_iso", lambda: "2026-04-12T12:00:00+00:00")
+
+    (temp_workspace / "wiki" / "sources" / "20260412-sample-note.md").write_text(
+        read_fixture(repo_root, "ingest_source_page.md"),
+        encoding="utf-8",
+    )
+    config, paths = load_config(temp_workspace)
+
+    run_query(
+        config,
+        paths,
+        FakeLLMClient(),
+        "What are the main design patterns in my notes?",
+        write_page=True,
+    )
+
+    actual = (temp_workspace / "wiki" / "syntheses" / "design-patterns.md").read_text(encoding="utf-8")
+    expected = read_fixture(repo_root, "query_synthesis_page.md")
+    assert actual == expected
+
+
+def test_doctor_reports_schema_mismatch(temp_workspace: Path, runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    schema_path = temp_workspace / "config" / "schema.md"
+    schema_path.write_text(schema_path.read_text(encoding="utf-8").replace("Schema version: `1`", "Schema version: `2`"), encoding="utf-8")
+
+    result = runner.invoke(app, ["doctor", "--base-dir", str(temp_workspace)])
+    assert result.exit_code == 0, result.output
+    assert "Schema contract: warn" in result.output
+    assert "schema.md=2" in result.output

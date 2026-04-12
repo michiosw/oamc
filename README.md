@@ -4,6 +4,8 @@
 
 This repo is designed for a single user working in one vault. The wiki is the artifact. The LLM does the bookkeeping: source summaries, concept pages, entity pages, synthesis pages, backlinks, index updates, and log entries.
 
+This is now structured as an open-source-ready project: schema versioned, type-checked, CI-backed, and intentionally narrow in its write path.
+
 ## What this ships
 
 - A git-backed Obsidian-friendly vault layout
@@ -83,6 +85,17 @@ That gives you:
 - a one-click way to open the dashboard, Obsidian, or process the inbox manually
 
 When you update `oamc`, run `uv run llm-wiki install-menubar` again once to refresh the installed app bundle.
+
+## Open source quality gates
+
+The repo is kept lean on purpose, but it has hard quality gates:
+
+- `uv run pytest`
+- `python3 -m compileall src tests`
+- `uv run mypy src`
+- `uv run llm-wiki doctor`
+
+The schema contract is versioned in both `config/config.yaml` and `config/schema.md`. Hard cutover applies: when the schema version changes, refresh those files from the repo instead of maintaining compatibility shims.
 
 Check repo health any time:
 
@@ -218,3 +231,5 @@ Suggested workflow:
 - `wiki/` is LLM-maintained output.
 - `wiki/index.md` is the first file the agent should consult for retrieval.
 - `wiki/log.md` is the append-only operations log.
+- `raw/inbox/` is the only supported clipping destination. `Clippings/` is outside the pipeline and flagged by `llm-wiki doctor`.
+- `CONTRIBUTING.md` and `SECURITY.md` are the source of truth for contributor workflow and disclosure.

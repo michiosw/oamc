@@ -13,10 +13,12 @@ from llm_wiki.models import AppConfig, IngestResult, LintResult, RepoPaths
 from llm_wiki.ops.ingest import ingest_sources
 from llm_wiki.ops.lint import run_lint
 from llm_wiki.paths import repo_relative
+from llm_wiki.telemetry import get_logger, log_event
 
 
 Emitter = Callable[[str], None]
 ClientFactory = Callable[[], LLMClient]
+LOGGER = get_logger(__name__)
 
 
 def inbox_snapshot(repo_paths: RepoPaths) -> tuple[tuple[str, int, int], ...]:
@@ -45,6 +47,7 @@ def run_process_once(
             emit("Inbox is empty. Nothing to process.")
         return IngestResult(), None
 
+    log_event(LOGGER, "process_once_started", inbox_count=len(inbox_paths), lint=lint)
     ingest_result = ingest_sources(config, repo_paths, client, inbox_paths)
     if emit:
         count = len(ingest_result.processed_sources)
@@ -60,6 +63,13 @@ def run_process_once(
         lint_result = run_lint(config, repo_paths, client)
         if emit:
             emit(f"Lint complete ({len(lint_result.issues)} issues)")
+    log_event(
+        LOGGER,
+        "process_once_completed",
+        ingest_operation_id=ingest_result.operation_id,
+        lint_operation_id=lint_result.operation_id if lint_result else None,
+        processed_sources=len(ingest_result.processed_sources),
+    )
     return ingest_result, lint_result
 
 
@@ -85,12 +95,14 @@ def watch_loop(
             pending_snapshot = snapshot
             if emit:
                 emit("Detected inbox change. Waiting for files to settle...")
+            log_event(LOGGER, "watch_inbox_changed", inbox_count=len(snapshot))
         elif snapshot and pending_snapshot is not None and snapshot == pending_snapshot and snapshot != last_processed:
             try:
                 if client is None:
                     client = client_factory()
                 if emit:
                     emit("Processing inbox...")
+                log_event(LOGGER, "watch_processing_started", inbox_count=len(snapshot))
                 if process_lock is not None:
                     with process_lock:
                         run_process_once(config, repo_paths, client, lint=lint, emit=emit)
@@ -101,9 +113,11 @@ def watch_loop(
             except RuntimeError as exc:
                 if emit:
                     emit(str(exc))
+                log_event(LOGGER, "watch_processing_runtime_error", error=str(exc))
             except Exception as exc:
                 if emit:
                     emit(f"Processing failed: {exc}")
+                log_event(LOGGER, "watch_processing_failed", error=str(exc))
         last_seen = snapshot
         time.sleep(interval)
 

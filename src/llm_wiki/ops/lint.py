@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from uuid import uuid4
 
 from llm_wiki.health import index_drift, log_heading_issues, page_metadata_issues
 from llm_wiki.llm.base import LLMClient
@@ -10,6 +11,10 @@ from llm_wiki.ops.common import append_log_entry, normalize_existing_wiki_page, 
 from llm_wiki.ops.rebuild_index import rebuild_index
 from llm_wiki.ops.search import inbound_link_counts, iter_wiki_pages, relative_link_targets
 from llm_wiki.paths import repo_relative
+from llm_wiki.telemetry import get_logger, log_event
+
+
+LOGGER = get_logger(__name__)
 
 
 def detect_issues(repo_paths: RepoPaths) -> list[LintIssue]:
@@ -48,6 +53,7 @@ def run_lint(
     repo_paths: RepoPaths,
     client: LLMClient,
 ) -> LintResult:
+    operation_id = uuid4().hex[:8]
     touched: list[str] = []
     normalized_pages: list[str] = []
     for page in iter_wiki_pages(repo_paths):
@@ -88,6 +94,7 @@ def run_lint(
             issues=[],
             touched=sorted(set(touched)),
             normalized_pages=normalized_pages,
+            operation_id=operation_id,
         )
 
     page_contexts: dict[str, str] = {}
@@ -119,8 +126,17 @@ def run_lint(
         touched_pages=sorted(set(touched)),
     )
     touched.append(repo_relative(repo_paths.log, repo_paths.base_dir))
+    log_event(
+        LOGGER,
+        "lint_completed",
+        operation_id=operation_id,
+        issues=len(issues),
+        normalized_pages=len(normalized_pages),
+        touched=len(set(touched)),
+    )
     return LintResult(
         issues=issues,
         touched=sorted(set(touched)),
         normalized_pages=normalized_pages,
+        operation_id=operation_id,
     )

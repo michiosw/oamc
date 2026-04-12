@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 from llm_wiki.llm.base import LLMClient
 from llm_wiki.markdown import extract_section, slugify, summary_from_content, title_from_content
-from llm_wiki.models import AppConfig, QueryRequest, QueryResult, RepoPaths
+from llm_wiki.models import AppConfig, QueryRequest, QueryResult, RepoPaths, ResearchTemplate
 from llm_wiki.ops.common import append_log_entry, write_wiki_draft
 from llm_wiki.ops.rebuild_index import rebuild_index
 from llm_wiki.ops.search import load_page_contexts, search_pages
 from llm_wiki.paths import repo_relative
+from llm_wiki.telemetry import get_logger, log_event
+
+
+LOGGER = get_logger(__name__)
 
 
 def run_query(
@@ -16,10 +22,11 @@ def run_query(
     question: str,
     *,
     write_page: bool,
-    template: str = "synthesis",
+    template: ResearchTemplate = "synthesis",
     top_k: int | None = None,
     scopes: list[str] | None = None,
 ) -> QueryResult:
+    operation_id = uuid4().hex[:8]
     candidates = search_pages(
         repo_paths,
         question,
@@ -40,6 +47,14 @@ def run_query(
         page_contexts=contexts,
     )
     response = client.query(request)
+    log_event(
+        LOGGER,
+        "query_completed",
+        operation_id=operation_id,
+        question=question,
+        template=template,
+        candidate_count=len(candidates),
+    )
     touched: list[str] = []
     page_path: str | None = None
     if write_page:
@@ -71,4 +86,5 @@ def run_query(
         content=response.page.content,
         template=template,
         selected_candidates=[candidate.relative_path for candidate in candidates],
+        operation_id=operation_id,
     )

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from typing import Any, cast
 
 from llm_wiki.health import build_doctor_report
 from llm_wiki import __version__
@@ -289,15 +290,15 @@ def run_menubar(
                 "Quit oamc",
             ]
             self.title = APP_NAME
-            self._status_item = self.menu["Status"]
+            self._status_item = cast(Any, self.menu)["Status"]
             self._status_item.set_callback(None)
-            self._runtime_item = self.menu["Runtime"]
+            self._runtime_item = cast(Any, self.menu)["Runtime"]
             self._runtime_item.set_callback(None)
             self._timer = rumps.Timer(self.refresh, 5)
             self._timer.start()
             self.refresh(None)
 
-        def refresh(self, _sender) -> None:
+        def refresh(self, _sender: object) -> None:
             pending = inbox_count(repo_paths)
             heading = latest_log_heading(repo_paths) or "No activity yet"
             report = build_doctor_report(config, repo_paths, host=host, port=port)
@@ -308,15 +309,15 @@ def run_menubar(
             self._runtime_item.title = f"Runtime: {dashboard_state} · watcher on · {report.overall_status}"
 
         @rumps.clicked("Open Dashboard")
-        def open_dashboard(self, _sender) -> None:
+        def open_dashboard(self, _sender: object) -> None:
             subprocess.run(["open", dashboard.url], check=False)
 
         @rumps.clicked("Open Obsidian")
-        def open_obsidian(self, _sender) -> None:
+        def open_obsidian(self, _sender: object) -> None:
             subprocess.run(["open", "-a", "Obsidian", repo_paths.base_dir.as_posix()], check=False)
 
         @rumps.clicked("Process Inbox Now")
-        def process_now(self, _sender) -> None:
+        def process_now(self, _sender: object) -> None:
             def _task() -> None:
                 try:
                     with process_lock:
@@ -335,22 +336,22 @@ def run_menubar(
             threading.Thread(target=_task, daemon=True, name="llm-wiki-process-now").start()
 
         @rumps.clicked("Open Repo")
-        def open_repo(self, _sender) -> None:
+        def open_repo(self, _sender: object) -> None:
             subprocess.run(["open", repo_paths.base_dir.as_posix()], check=False)
 
         @rumps.clicked("Restart oamc")
-        def restart_app(self, _sender) -> None:
+        def restart_app(self, _sender: object) -> None:
             restart_managed_app(repo_paths.base_dir)
             stop_event.set()
             dashboard.stop()
             rumps.quit_application()
 
         @rumps.clicked("Reveal oamc.app")
-        def reveal_app(self, _sender) -> None:
+        def reveal_app(self, _sender: object) -> None:
             reveal_installed_app(repo_paths.base_dir)
 
         @rumps.clicked("Quit oamc")
-        def quit_app(self, _sender) -> None:
+        def quit_app(self, _sender: object) -> None:
             stop_event.set()
             dashboard.stop()
             rumps.quit_application()

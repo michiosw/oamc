@@ -25,7 +25,7 @@ def load_markdown(path: Path) -> tuple[dict[str, Any], str]:
 
 def dump_markdown(metadata: dict[str, Any], body: str) -> str:
     post = frontmatter.Post(body.strip(), **metadata)
-    return frontmatter.dumps(post).strip() + "\n"
+    return str(frontmatter.dumps(post)).strip() + "\n"
 
 
 def upsert_frontmatter(
@@ -69,7 +69,7 @@ def title_from_content(content: str, fallback: str) -> str:
     for line in post.content.splitlines():
         stripped = line.strip()
         if stripped.startswith("#"):
-            return stripped.lstrip("#").strip()
+            return str(stripped.lstrip("#").strip())
     return fallback
 
 

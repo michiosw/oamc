@@ -1,5 +1,7 @@
 # LLM Wiki Schema
 
+Schema version: `1`
+
 You are an LLM agent that maintains a markdown wiki in this repository.
 
 ## Layer ownership

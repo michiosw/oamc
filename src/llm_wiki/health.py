@@ -7,18 +7,20 @@ import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Literal
 
 import frontmatter
 
 from llm_wiki.env import api_key_issue
 from llm_wiki.markdown import extract_wikilinks
-from llm_wiki.models import ActivityEntry, AppConfig, DoctorReport, HealthCheck, RepoPaths
+from llm_wiki.models import ActivityEntry, AppConfig, CURRENT_SCHEMA_VERSION, DoctorReport, HealthCheck, RepoPaths
 from llm_wiki.ops.search import iter_wiki_pages
 from llm_wiki.paths import repo_relative
 
 
 LOG_HEADING_RE = re.compile(r"^## \[\d{4}-\d{2}-\d{2}\] [a-z-]+ \| .+$")
 REQUIRED_FRONTMATTER_KEYS = ("title", "type", "created", "updated", "tags", "source_refs", "status")
+SCHEMA_VERSION_RE = re.compile(r"^Schema version:\s*`?(\d+)`?\s*$", re.MULTILINE)
 
 
 def build_doctor_report(
@@ -85,6 +87,24 @@ def build_doctor_report(
                 if key_issue == "missing"
                 else f"Replace the placeholder {config.openai_api_key_env} value in .env with a real OpenAI API key."
                 if key_issue == "placeholder"
+                else ""
+            ),
+        )
+    )
+
+    schema_doc_version = schema_version_in_document(repo_paths)
+    schema_versions_match = schema_doc_version == CURRENT_SCHEMA_VERSION == config.schema_version
+    checks.append(
+        HealthCheck(
+            key="schema-version",
+            label="Schema contract",
+            status="ok" if schema_versions_match else "warn",
+            detail=(
+                f"config={config.schema_version}, schema.md={schema_doc_version}, expected={CURRENT_SCHEMA_VERSION}"
+            ),
+            recommendation=(
+                "Update config/config.yaml and config/schema.md to the current schema version."
+                if not schema_versions_match
                 else ""
             ),
         )
@@ -212,9 +232,10 @@ def build_doctor_report(
 
     latest_ingest = parse_latest_log_entry(repo_paths, operation="ingest")
     latest_processed_source = latest_source_path(repo_paths)
-    latest_log_heading = parse_latest_log_entry(repo_paths).heading if parse_latest_log_entry(repo_paths) else None
+    latest_entry = parse_latest_log_entry(repo_paths)
+    latest_log_heading = latest_entry.heading if latest_entry else None
 
-    overall_status = "ok"
+    overall_status: Literal["ok", "warn", "error"] = "ok"
     if any(check.status == "error" for check in checks):
         overall_status = "error"
     elif any(check.status == "warn" for check in checks):
@@ -252,6 +273,16 @@ def find_clippings_files(repo_paths: RepoPaths) -> list[str]:
         if path.is_file()
     ]
     return files
+
+
+def schema_version_in_document(repo_paths: RepoPaths) -> int | None:
+    schema_path = repo_paths.config_dir / "schema.md"
+    if not schema_path.exists():
+        return None
+    match = SCHEMA_VERSION_RE.search(schema_path.read_text(encoding="utf-8"))
+    if match is None:
+        return None
+    return int(match.group(1))
 
 
 def index_drift(repo_paths: RepoPaths) -> tuple[list[str], list[str]]:
@@ -311,7 +342,7 @@ def log_heading_issues(repo_paths: RepoPaths) -> list[str]:
 def dashboard_reachable(*, host: str, port: int) -> bool:
     try:
         with urllib.request.urlopen(f"http://{host}:{port}", timeout=1.0) as response:
-            return 200 <= response.status < 400
+            return bool(200 <= response.status < 400)
     except (urllib.error.URLError, TimeoutError, ValueError, http.client.HTTPException, OSError):
         return False
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 from llm_wiki.llm.base import LLMClient
 from llm_wiki.markdown import read_text, slugify
@@ -11,6 +12,10 @@ from llm_wiki.ops.common import append_log_entry, write_wiki_draft
 from llm_wiki.ops.rebuild_index import rebuild_index
 from llm_wiki.ops.search import list_candidates
 from llm_wiki.paths import repo_relative
+from llm_wiki.telemetry import get_logger, log_event
+
+
+LOGGER = get_logger(__name__)
 
 
 def _resolve_source_path(repo_paths: RepoPaths, value: Path) -> Path:
@@ -59,6 +64,7 @@ def ingest_sources(
     client: LLMClient,
     source_paths: list[Path],
 ) -> IngestResult:
+    operation_id = uuid4().hex[:8]
     all_touched: list[str] = []
     processed_sources: list[str] = []
     source_pages: list[str] = []
@@ -70,6 +76,12 @@ def ingest_sources(
     for original_path in source_paths:
         touched: list[str] = []
         source_path = _resolve_source_path(repo_paths, original_path)
+        log_event(
+            LOGGER,
+            "ingest_source_started",
+            operation_id=operation_id,
+            source_path=repo_relative(source_path, repo_paths.base_dir),
+        )
         source_text = read_text(source_path)
         storage_destination = _planned_storage_destination(repo_paths, source_path)
         stored_relative = repo_relative(storage_destination, repo_paths.base_dir)
@@ -127,6 +139,14 @@ def ingest_sources(
         touched.append(repo_relative(repo_paths.log, repo_paths.base_dir))
         all_touched.extend(touched)
         processed_sources.append(stored_relative)
+        log_event(
+            LOGGER,
+            "ingest_source_completed",
+            operation_id=operation_id,
+            source_path=stored_relative,
+            source_page=source_page_path,
+            touched=len(set(touched)),
+        )
 
     return IngestResult(
         touched=sorted(set(all_touched)),
@@ -134,4 +154,5 @@ def ingest_sources(
         source_pages=source_pages,
         entity_pages=entity_pages,
         concept_pages=concept_pages,
+        operation_id=operation_id,
     )
