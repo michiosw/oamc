@@ -161,6 +161,17 @@ Scoped answer.
         raise NotImplementedError
 
 
+class RuntimeErrorLLMClient(LLMClient):
+    def ingest(self, request: IngestRequest) -> IngestResponse:
+        raise RuntimeError("OpenAI authentication failed. Update OPENAI_API_KEY in .env, then restart oamc.")
+
+    def query(self, request: QueryRequest) -> QueryResponse:
+        raise RuntimeError("OpenAI authentication failed. Update OPENAI_API_KEY in .env, then restart oamc.")
+
+    def lint(self, request: LintRequest) -> LintResponse:
+        raise RuntimeError("OpenAI authentication failed. Update OPENAI_API_KEY in .env, then restart oamc.")
+
+
 def test_cli_smoke_workflows(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
     from llm_wiki import cli
 
@@ -387,6 +398,16 @@ def test_doctor_reports_missing_api_key_and_clippings(temp_workspace: Path, runn
     assert "Clipper destination: warn" in result.output
 
 
+def test_doctor_reports_placeholder_api_key(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    (temp_workspace / ".env").write_text("OPENAI_API_KEY=your_api_key_here\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["doctor", "--base-dir", str(temp_workspace)])
+    assert result.exit_code == 0, result.output
+    assert "OpenAI API key: error" in result.output
+    assert "placeholder value" in result.output
+
+
 def test_doctor_report_detects_index_drift_and_malformed_page(temp_workspace: Path, monkeypatch) -> None:
     from llm_wiki.ops.common import default_page
 
@@ -411,6 +432,28 @@ def test_doctor_report_detects_index_drift_and_malformed_page(temp_workspace: Pa
     page_check = next(check for check in report.checks if check.key == "page-metadata")
     assert index_check.status == "warn"
     assert page_check.status == "warn"
+
+
+def test_status_reports_pending_inbox_next_step(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    (temp_workspace / "raw" / "inbox" / "queued.md").write_text("# Queued\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["status", "--base-dir", str(temp_workspace)])
+    assert result.exit_code == 0, result.output
+    assert "Inbox files: 1" in result.output
+    assert "Inbox pending. Let the menubar watcher process it, or run llm-wiki process." in result.output
+
+
+def test_process_command_reports_runtime_error_cleanly(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
+    from llm_wiki import cli
+
+    monkeypatch.setattr(cli, "build_client", lambda config: RuntimeErrorLLMClient())
+    (temp_workspace / "raw" / "inbox" / "sample-note.md").write_text("# Sample\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["process", "--no-lint", "--base-dir", str(temp_workspace)])
+    assert result.exit_code == 1, result.output
+    assert "OpenAI authentication failed." in result.output
+    assert "Traceback" not in result.output
 
 
 def test_query_scope_filters_context(temp_workspace: Path) -> None:

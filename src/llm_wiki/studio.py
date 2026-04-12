@@ -101,6 +101,9 @@ def watch_loop(
             except RuntimeError as exc:
                 if emit:
                     emit(str(exc))
+            except Exception as exc:
+                if emit:
+                    emit(f"Processing failed: {exc}")
         last_seen = snapshot
         time.sleep(interval)
 

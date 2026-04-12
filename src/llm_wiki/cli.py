@@ -151,6 +151,11 @@ def _emit(message: str) -> None:
     typer.echo(message)
 
 
+def _exit_on_runtime_error(exc: RuntimeError) -> None:
+    typer.echo(str(exc))
+    raise typer.Exit(code=1) from exc
+
+
 @app.command()
 def init(
     base_dir: Path = typer.Option(Path.cwd(), "--base-dir", resolve_path=True),
@@ -171,7 +176,10 @@ def ingest(
         typer.echo("Inbox is empty. Drop files into raw/inbox/ first.")
         raise typer.Exit()
     client = build_client_or_exit(config)
-    result = ingest_sources(config, repo_paths, client, paths)
+    try:
+        result = ingest_sources(config, repo_paths, client, paths)
+    except RuntimeError as exc:
+        _exit_on_runtime_error(exc)
     typer.echo(f"Ingest complete ({len(result.processed_sources)} source{'s' if len(result.processed_sources) != 1 else ''})")
     if result.processed_sources:
         _render_list("Processed sources:", result.processed_sources)
@@ -206,16 +214,19 @@ def query(
         raise typer.Exit(code=1)
     config, repo_paths = load_config(base_dir)
     client = build_client_or_exit(config)
-    result = run_query(
-        config,
-        repo_paths,
-        client,
-        question,
-        write_page=write_page,
-        template=template,
-        top_k=top_k,
-        scopes=scope,
-    )
+    try:
+        result = run_query(
+            config,
+            repo_paths,
+            client,
+            question,
+            write_page=write_page,
+            template=template,
+            top_k=top_k,
+            scopes=scope,
+        )
+    except RuntimeError as exc:
+        _exit_on_runtime_error(exc)
     typer.echo("Query complete")
     if show_answer:
         _print_query_result(result)
@@ -229,7 +240,10 @@ def lint(
 ) -> None:
     config, repo_paths = load_config(base_dir)
     client = build_client_or_exit(config)
-    result = run_lint(config, repo_paths, client)
+    try:
+        result = run_lint(config, repo_paths, client)
+    except RuntimeError as exc:
+        _exit_on_runtime_error(exc)
     typer.echo(f"Lint complete ({len(result.issues)} issues)")
     if result.normalized_pages:
         _render_list("Normalized pages:", result.normalized_pages)
@@ -256,7 +270,10 @@ def process(
         raise typer.Exit()
 
     client = build_client_or_exit(config)
-    ingest_result, lint_result = run_process_once(config, repo_paths, client, lint=lint, emit=_emit)
+    try:
+        ingest_result, lint_result = run_process_once(config, repo_paths, client, lint=lint, emit=_emit)
+    except RuntimeError as exc:
+        _exit_on_runtime_error(exc)
     if ingest_result.source_pages:
         _render_list("Source pages:", ingest_result.source_pages)
     if ingest_result.entity_pages:
@@ -376,6 +393,8 @@ def watch(
             interval=interval,
             emit=_emit,
         )
+    except RuntimeError as exc:
+        _exit_on_runtime_error(exc)
     except KeyboardInterrupt:
         typer.echo("Stopped watching.")
 

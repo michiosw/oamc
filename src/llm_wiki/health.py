@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import os
 import re
 import subprocess
@@ -9,6 +10,7 @@ from pathlib import Path
 
 import frontmatter
 
+from llm_wiki.env import api_key_issue
 from llm_wiki.markdown import extract_wikilinks
 from llm_wiki.models import ActivityEntry, AppConfig, DoctorReport, HealthCheck, RepoPaths
 from llm_wiki.ops.search import iter_wiki_pages
@@ -25,6 +27,7 @@ def build_doctor_report(
     *,
     host: str = "127.0.0.1",
     port: int = 8421,
+    assume_dashboard_serving: bool = False,
 ) -> DoctorReport:
     checks: list[HealthCheck] = []
     clippings_files = find_clippings_files(repo_paths)
@@ -64,14 +67,26 @@ def build_doctor_report(
         )
     )
 
-    api_key_present = bool(os.getenv(config.openai_api_key_env))
+    key_issue = api_key_issue(config.openai_api_key_env)
     checks.append(
         HealthCheck(
             key="api-key",
             label="OpenAI API key",
-            status="ok" if api_key_present else "error",
-            detail=config.openai_api_key_env,
-            recommendation=f"Export {config.openai_api_key_env} before ingest/query." if not api_key_present else "",
+            status="ok" if key_issue is None else "error",
+            detail=(
+                config.openai_api_key_env
+                if key_issue == "missing"
+                else f"{config.openai_api_key_env} contains a placeholder value."
+                if key_issue == "placeholder"
+                else config.openai_api_key_env
+            ),
+            recommendation=(
+                f"Set {config.openai_api_key_env} in .env before ingest/query."
+                if key_issue == "missing"
+                else f"Replace the placeholder {config.openai_api_key_env} value in .env with a real OpenAI API key."
+                if key_issue == "placeholder"
+                else ""
+            ),
         )
     )
 
@@ -153,13 +168,13 @@ def build_doctor_report(
             )
         )
 
-    dashboard_ok = dashboard_reachable(host=host, port=port)
+    dashboard_ok = assume_dashboard_serving or dashboard_reachable(host=host, port=port)
     checks.append(
         HealthCheck(
             key="dashboard",
             label="Dashboard runtime",
             status="ok" if dashboard_ok else "warn",
-            detail=f"http://{host}:{port}" if dashboard_ok else "Dashboard is not responding on the default local port.",
+            detail="Dashboard is serving this page." if assume_dashboard_serving else (f"http://{host}:{port}" if dashboard_ok else "Dashboard is not responding on the default local port."),
             recommendation="Install or start the menubar app." if not dashboard_ok else "",
         )
     )
@@ -205,7 +220,12 @@ def build_doctor_report(
     elif any(check.status == "warn" for check in checks):
         overall_status = "warn"
 
-    recommended_next_step = "System healthy. Clip into raw/inbox/ and ask the wiki."
+    inbox_files = [path for path in repo_paths.raw_inbox.glob("*") if path.is_file()]
+    recommended_next_step = (
+        "Inbox pending. Let the menubar watcher process it, or run llm-wiki process."
+        if inbox_files
+        else "System healthy. Clip into raw/inbox/ and ask the wiki."
+    )
     for check in checks:
         if check.recommendation:
             recommended_next_step = check.recommendation
@@ -292,7 +312,7 @@ def dashboard_reachable(*, host: str, port: int) -> bool:
     try:
         with urllib.request.urlopen(f"http://{host}:{port}", timeout=1.0) as response:
             return 200 <= response.status < 400
-    except (urllib.error.URLError, TimeoutError, ValueError):
+    except (urllib.error.URLError, TimeoutError, ValueError, http.client.HTTPException, OSError):
         return False
 
 

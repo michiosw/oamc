@@ -96,6 +96,8 @@ def build_app_bundle(
         check=True,
     )
     built_app = dist_dir / APP_BUNDLE_NAME
+    if bundle_path.exists():
+        shutil.rmtree(bundle_path)
     shutil.copytree(built_app, bundle_path)
 
     contents_dir = bundle_path / "Contents"
@@ -325,8 +327,8 @@ def run_menubar(
                             lint=lint,
                             emit=notify,
                         )
-                except RuntimeError as exc:
-                    rumps.notification(APP_NAME, "Configuration issue", str(exc))
+                except Exception as exc:
+                    rumps.notification(APP_NAME, "Processing issue", str(exc))
                 finally:
                     self.refresh(None)
 

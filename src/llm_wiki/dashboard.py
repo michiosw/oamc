@@ -104,7 +104,7 @@ def normalize_page_path(page_path: str) -> str:
 
 def render_home(repo_paths: RepoPaths) -> str:
     config, _ = load_config(repo_paths.base_dir)
-    report = build_doctor_report(config, repo_paths)
+    report = build_doctor_report(config, repo_paths, assume_dashboard_serving=True)
     pages = sorted(iter_wiki_pages(repo_paths), key=lambda path: path.stat().st_mtime, reverse=True)
     recent = pages[:8]
     stats = {
