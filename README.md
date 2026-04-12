@@ -18,7 +18,7 @@ The product code is open source. Your live vault content is local by default and
 
 ## Inspirations
 
-`oamc` is directly inspired by Andrej Karpathy's April 2026 "LLM Knowledge Bases" / "LLM Wiki" posts and follow-up idea file, which framed the core `raw/ -> wiki/ -> query` pattern for LLM-maintained knowledge bases.
+`oamc` is directly inspired by Andrej Karpathy's April 4, 2026 X thread on LLM knowledge bases and the follow-up "LLM Wiki" idea file, which framed the core `raw/ -> wiki/ -> query` pattern for LLM-maintained knowledge bases.
 
 It also borrows its dashboard visual direction from OpenAI's "Designing delightful frontends with GPT-5.4" design language: calm editorial typography, restrained surfaces, sparse copy, and subtle motion instead of generic SaaS chrome.
 
@@ -185,7 +185,7 @@ Suggested workflow:
 3. Run `uv run llm-wiki process`
 4. Review the new wiki pages in Obsidian
 5. Ask research questions with `uv run llm-wiki query "..." --template synthesis`
-6. Commit `raw/` and `wiki/` when the changes look good
+6. Commit product code, config, tests, and docs when you change the tool itself. Leave `raw/` and `wiki/` local by default.
 
 ## Daily commands
 
