@@ -9,12 +9,17 @@ import threading
 from pathlib import Path
 from typing import Any, cast
 
-from llm_wiki.core.health import build_doctor_report
 from llm_wiki import __version__
 from llm_wiki.core.config import load_config
+from llm_wiki.core.health import build_doctor_report
 from llm_wiki.llm.openai_client import OpenAIWikiClient
-from llm_wiki.runtime.studio import DashboardServer, inbox_count, latest_log_heading, run_process_once, watch_loop
-
+from llm_wiki.runtime.studio import (
+    DashboardServer,
+    inbox_count,
+    latest_log_heading,
+    run_process_once,
+    watch_loop,
+)
 
 LAUNCH_AGENT_LABEL = "dev.oamc.studio"
 APP_NAME = "oamc"

@@ -3,9 +3,13 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
-from llm_wiki.core.markdown import link_target_for_path, load_markdown, slugify, summary_from_content
+from llm_wiki.core.markdown import (
+    link_target_for_path,
+    load_markdown,
+    slugify,
+    summary_from_content,
+)
 from llm_wiki.core.models import RepoPaths, SearchCandidate
-
 
 WIKI_DIRS = ("sources", "entities", "concepts", "syntheses")
 

@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 from llm_wiki.core.env import load_repo_env
-from llm_wiki.core.models import AppConfig, CURRENT_SCHEMA_VERSION, RepoPaths
+from llm_wiki.core.models import CURRENT_SCHEMA_VERSION, AppConfig, RepoPaths
 from llm_wiki.core.paths import build_repo_paths, find_base_dir
 
 

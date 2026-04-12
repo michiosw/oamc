@@ -24,8 +24,14 @@ jobs:
       - name: Run tests
         run: uv run pytest
 
+      - name: Lint
+        run: uv run ruff check src tests
+
       - name: Compile sources
         run: python3 -m compileall src tests
 
       - name: Type-check
         run: uv run mypy src
+
+      - name: Build package
+        run: uv build

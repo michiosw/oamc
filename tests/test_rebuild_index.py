@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from llm_wiki.core.config import load_config
 from llm_wiki.ops.common import default_page
 from llm_wiki.ops.rebuild_index import rebuild_index
-from llm_wiki.core.config import load_config
 
 
 def test_rebuild_index_lists_pages(temp_workspace: Path) -> None:

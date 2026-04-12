@@ -6,8 +6,8 @@ import pytest
 from typer.testing import CliRunner
 
 from llm_wiki.cli import app
+from llm_wiki.core.config import load_config
 from llm_wiki.core.health import build_doctor_report
-from llm_wiki.llm.base import LLMClient
 from llm_wiki.core.models import (
     IngestRequest,
     IngestResponse,
@@ -17,8 +17,8 @@ from llm_wiki.core.models import (
     QueryRequest,
     QueryResponse,
 )
+from llm_wiki.llm.base import LLMClient
 from llm_wiki.ops.ingest import ingest_sources
-from llm_wiki.core.config import load_config
 
 
 def read_fixture(path: Path, name: str) -> str:

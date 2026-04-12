@@ -4,7 +4,6 @@ from pathlib import Path
 
 from llm_wiki.core.models import AppConfig, RepoPaths
 
-
 REQUIRED_DIRS = (
     "config",
     "raw/inbox",

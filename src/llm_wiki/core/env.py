@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-
 PLACEHOLDER_API_KEY_MARKERS = (
     "your_api_key_here",
     "your_key_here",

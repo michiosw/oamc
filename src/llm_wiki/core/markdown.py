@@ -6,7 +6,6 @@ from typing import Any
 
 import frontmatter
 
-
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")

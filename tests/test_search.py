@@ -4,7 +4,7 @@ from pathlib import Path
 
 from llm_wiki.core.config import load_config
 from llm_wiki.ops.common import default_page
-from llm_wiki.ops.search import list_candidates, filter_candidates, search_pages
+from llm_wiki.ops.search import filter_candidates, list_candidates, search_pages
 
 
 def test_search_ranks_relevant_pages(temp_workspace: Path) -> None:

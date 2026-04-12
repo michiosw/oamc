@@ -6,8 +6,6 @@ from typing import TypeVar
 from openai import AuthenticationError, OpenAI
 
 from llm_wiki.core.env import api_key_issue
-
-from llm_wiki.llm.base import LLMClient
 from llm_wiki.core.models import (
     AppConfig,
     IngestRequest,
@@ -22,7 +20,7 @@ from llm_wiki.core.prompts import (
     build_lint_prompts,
     build_query_prompts,
 )
-
+from llm_wiki.llm.base import LLMClient
 
 ResponseT = TypeVar("ResponseT")
 

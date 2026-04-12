@@ -4,7 +4,6 @@ from llm_wiki.core.markdown import link_target_for_path, load_markdown, summary_
 from llm_wiki.core.models import RepoPaths
 from llm_wiki.ops.search import iter_wiki_pages
 
-
 SECTION_TITLES = {
     "sources": "Sources",
     "entities": "Entities",

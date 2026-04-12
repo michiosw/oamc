@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import threading
 import webbrowser
 from pathlib import Path
@@ -11,20 +10,27 @@ import typer
 
 from llm_wiki.core.config import load_config, write_default_config
 from llm_wiki.core.health import build_doctor_report
+from llm_wiki.core.models import (
+    RESEARCH_TEMPLATES,
+    AppConfig,
+    DoctorReport,
+    LintResult,
+    QueryResult,
+    RepoPaths,
+    ResearchTemplate,
+)
+from llm_wiki.core.paths import ensure_structure, repo_relative
+from llm_wiki.core.telemetry import configure_logging, get_logger, log_event
+from llm_wiki.integrations.menubar import install_launch_agent, run_menubar, uninstall_launch_agent
+from llm_wiki.integrations.obsidian import open_in_obsidian
 from llm_wiki.llm.base import LLMClient
 from llm_wiki.llm.openai_client import OpenAIWikiClient
-from llm_wiki.integrations.menubar import install_launch_agent, run_menubar, uninstall_launch_agent
-from llm_wiki.core.models import AppConfig, DoctorReport, LintResult, QueryResult, RESEARCH_TEMPLATES, RepoPaths, ResearchTemplate
-from llm_wiki.integrations.obsidian import open_in_obsidian
 from llm_wiki.ops.ingest import ingest_sources
 from llm_wiki.ops.lint import run_lint
 from llm_wiki.ops.query import run_query
 from llm_wiki.ops.rebuild_index import rebuild_index
 from llm_wiki.ops.search import iter_wiki_pages
-from llm_wiki.core.paths import ensure_structure, repo_relative
 from llm_wiki.runtime.studio import DashboardServer, run_process_once, watch_loop
-from llm_wiki.core.telemetry import configure_logging, get_logger, log_event
-
 
 app = typer.Typer(help="Maintain a local-first markdown wiki with an LLM.")
 LOGGER = get_logger(__name__)

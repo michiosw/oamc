@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
-import re
 
 from llm_wiki.core.markdown import (
     dump_markdown,
@@ -13,7 +13,6 @@ from llm_wiki.core.markdown import (
     upsert_frontmatter,
 )
 from llm_wiki.core.models import PageDraft, RepoPaths
-
 
 ALLOWED_WIKI_PREFIXES = ("sources/", "entities/", "concepts/", "syntheses/")
 

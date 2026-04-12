@@ -13,10 +13,16 @@ import frontmatter
 
 from llm_wiki.core.env import api_key_issue
 from llm_wiki.core.markdown import extract_wikilinks
-from llm_wiki.core.models import ActivityEntry, AppConfig, CURRENT_SCHEMA_VERSION, DoctorReport, HealthCheck, RepoPaths
-from llm_wiki.ops.search import iter_wiki_pages
+from llm_wiki.core.models import (
+    CURRENT_SCHEMA_VERSION,
+    ActivityEntry,
+    AppConfig,
+    DoctorReport,
+    HealthCheck,
+    RepoPaths,
+)
 from llm_wiki.core.paths import repo_relative
-
+from llm_wiki.ops.search import iter_wiki_pages
 
 LOG_HEADING_RE = re.compile(r"^## \[\d{4}-\d{2}-\d{2}\] [a-z-]+ \| .+$")
 REQUIRED_FRONTMATTER_KEYS = ("title", "type", "created", "updated", "tags", "source_refs", "status")

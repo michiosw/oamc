@@ -3,9 +3,9 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from llm_wiki.core.config import load_config
-from llm_wiki.runtime.dashboard import create_dashboard_app
 from llm_wiki.core.models import QueryResult
 from llm_wiki.ops.common import default_page
+from llm_wiki.runtime.dashboard import create_dashboard_app
 
 
 def test_dashboard_home_and_search(temp_workspace) -> None:

@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from uuid import uuid4
 
 from llm_wiki.core.health import index_drift, log_heading_issues, page_metadata_issues
-from llm_wiki.llm.base import LLMClient
 from llm_wiki.core.markdown import extract_wikilinks, link_target_for_path
 from llm_wiki.core.models import AppConfig, LintIssue, LintRequest, LintResult, RepoPaths
+from llm_wiki.core.paths import repo_relative
+from llm_wiki.core.telemetry import get_logger, log_event
+from llm_wiki.llm.base import LLMClient
 from llm_wiki.ops.common import append_log_entry, normalize_existing_wiki_page, write_wiki_draft
 from llm_wiki.ops.rebuild_index import rebuild_index
 from llm_wiki.ops.search import inbound_link_counts, iter_wiki_pages, relative_link_targets
-from llm_wiki.core.paths import repo_relative
-from llm_wiki.core.telemetry import get_logger, log_event
-
 
 LOGGER = get_logger(__name__)
 
