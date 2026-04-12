@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from llm_wiki.cli import app
@@ -15,6 +16,8 @@ from llm_wiki.models import (
     QueryRequest,
     QueryResponse,
 )
+from llm_wiki.ops.ingest import ingest_sources
+from llm_wiki.config import load_config
 
 
 class FakeLLMClient(LLMClient):
@@ -48,7 +51,7 @@ This source discusses a personal LLM wiki workflow.
             ),
             entity_pages=[
                 PageDraft(
-                    relative_path="entities/obsidian.md",
+                    relative_path="wiki/entities/obsidian.md",
                     content="""---
 title: Obsidian
 tags:
@@ -171,3 +174,37 @@ def test_init_command_creates_workspace(tmp_path: Path, runner: CliRunner) -> No
     assert result.exit_code == 0, result.output
     assert (tmp_path / "config" / "config.yaml").exists()
     assert (tmp_path / "wiki" / "index.md").exists()
+
+
+class FailingLLMClient(LLMClient):
+    def ingest(self, request: IngestRequest) -> IngestResponse:
+        return IngestResponse(
+            source_page=PageDraft(
+                relative_path="sources/example.md",
+                content="# Example\n",
+            ),
+            entity_pages=[
+                PageDraft(
+                    relative_path="wiki/not-allowed/example.md",
+                    content="# Invalid\n",
+                )
+            ],
+        )
+
+    def query(self, request: QueryRequest) -> QueryResponse:
+        raise NotImplementedError
+
+    def lint(self, request: LintRequest) -> LintResponse:
+        raise NotImplementedError
+
+
+def test_ingest_does_not_move_source_on_failure(temp_workspace: Path) -> None:
+    source_path = temp_workspace / "raw" / "inbox" / "sample.md"
+    source_path.write_text("# Sample\n", encoding="utf-8")
+    config, paths = load_config(temp_workspace)
+
+    with pytest.raises(ValueError):
+        ingest_sources(config, paths, FailingLLMClient(), [source_path])
+
+    assert source_path.exists()
+    assert not any((temp_workspace / "raw" / "sources").iterdir())

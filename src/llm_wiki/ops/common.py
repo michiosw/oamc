@@ -48,6 +48,8 @@ def normalize_draft(
     if not relative_path:
         raise ValueError("Draft is missing a relative path.")
     relative_path = relative_path.lstrip("/")
+    if relative_path.startswith("wiki/"):
+        relative_path = relative_path[5:]
     if not relative_path.endswith(".md"):
         relative_path += ".md"
     if not relative_path.startswith(ALLOWED_WIKI_PREFIXES):

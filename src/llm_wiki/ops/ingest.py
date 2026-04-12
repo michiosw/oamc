@@ -23,7 +23,7 @@ def _resolve_source_path(repo_paths: RepoPaths, value: Path) -> Path:
     raise FileNotFoundError(f"Source path not found: {value}")
 
 
-def _store_source(repo_paths: RepoPaths, source_path: Path) -> tuple[Path, str]:
+def _planned_storage_destination(repo_paths: RepoPaths, source_path: Path) -> Path:
     stamp = datetime.now(UTC).strftime("%Y%m%d")
     destination_name = f"{stamp}-{slugify(source_path.stem)}{source_path.suffix.lower()}"
     destination = repo_paths.raw_sources / destination_name
@@ -31,12 +31,14 @@ def _store_source(repo_paths: RepoPaths, source_path: Path) -> tuple[Path, str]:
     while destination.exists():
         destination = repo_paths.raw_sources / f"{stamp}-{slugify(source_path.stem)}-{counter}{source_path.suffix.lower()}"
         counter += 1
+    return destination
 
+
+def _store_source(repo_paths: RepoPaths, source_path: Path, destination: Path) -> Path:
     try:
-        relative = source_path.resolve().relative_to(repo_paths.raw_inbox.resolve())
+        source_path.resolve().relative_to(destination.parents[1] / "inbox")
         is_in_inbox = True
     except ValueError:
-        relative = None
         is_in_inbox = False
 
     if source_path.resolve() == destination.resolve():
@@ -65,9 +67,10 @@ def ingest_sources(
         touched: list[str] = []
         source_path = _resolve_source_path(repo_paths, original_path)
         source_text = read_text(source_path)
-        stored_source, stored_relative = _store_source(repo_paths, source_path)
+        storage_destination = _planned_storage_destination(repo_paths, source_path)
+        stored_relative = repo_relative(storage_destination, repo_paths.base_dir)
         request = IngestRequest(
-            source_name=stored_source.name,
+            source_name=storage_destination.name,
             source_text=source_text,
             source_path=stored_relative,
             schema_text=schema_text,
@@ -76,7 +79,7 @@ def ingest_sources(
         )
         response = client.ingest(request)
 
-        source_page_default = f"sources/{stored_source.stem}.md"
+        source_page_default = f"sources/{storage_destination.stem}.md"
         touched.append(
             write_wiki_draft(
                 response.source_page,
@@ -106,10 +109,11 @@ def ingest_sources(
         append_log_entry(
             repo_paths,
             operation="ingest",
-            title=stored_source.stem,
+            title=storage_destination.stem,
             summary=response.notes or f"Ingested {stored_relative} into the wiki.",
             touched_pages=sorted(set(touched)),
         )
+        _store_source(repo_paths, source_path, storage_destination)
         touched.append(repo_relative(repo_paths.log, repo_paths.base_dir))
         all_touched.extend(touched)
 

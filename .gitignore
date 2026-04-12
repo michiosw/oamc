@@ -1,5 +1,6 @@
 .DS_Store
 .env
+.obsidian/
 .obsidian/workspace.json
 .pytest_cache/
 .ruff_cache/
