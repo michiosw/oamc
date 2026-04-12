@@ -299,7 +299,7 @@ dependencies = [
     { name = "pyinstaller" },
     { name = "python-frontmatter" },
     { name = "pyyaml" },
-    { name = "rumps" },
+    { name = "rumps", marker = "sys_platform == 'darwin'" },
     { name = "typer" },
     { name = "uvicorn" },
 ]
@@ -322,7 +322,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.4" },
     { name = "python-frontmatter", specifier = ">=1.1.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
-    { name = "rumps", specifier = ">=0.4.0" },
+    { name = "rumps", marker = "sys_platform == 'darwin'", specifier = ">=0.4.0" },
     { name = "typer", specifier = ">=0.15.1" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.20250915" },
     { name = "uvicorn", specifier = ">=0.34.0" },

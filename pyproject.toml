@@ -11,7 +11,7 @@ dependencies = [
   "pyinstaller>=6.16.0",
   "pydantic>=2.10.0",
   "PyYAML>=6.0.2",
-  "rumps>=0.4.0",
+  "rumps>=0.4.0; sys_platform == 'darwin'",
   "python-frontmatter>=1.1.0",
   "typer>=0.15.1",
   "uvicorn>=0.34.0",
