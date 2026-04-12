@@ -302,6 +302,19 @@ def render_page(repo_paths: RepoPaths, target: Path) -> str:
     """
 
 
+def extract_preview_line(body: str) -> str:
+    for line in parse_markdown(body).content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            continue
+        if stripped in {"---", "***"}:
+            continue
+        return stripped
+    return ""
+
+
 def render_markdown(body: str) -> str:
     linked = WIKILINK_RE.sub(_wikilink_replacer, body)
     return MD.render(linked)
@@ -338,7 +351,7 @@ def render_metadata_value(value: object) -> str:
 def render_page_list_item(repo_paths: RepoPaths, page: Path) -> str:
     metadata, body = load_markdown(page)
     relative_path = page.relative_to(repo_paths.wiki_root).as_posix()
-    summary = parse_markdown(body).content.splitlines()[0] if body else ""
+    summary = extract_preview_line(body)
     date_label = datetime.fromtimestamp(page.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
     return (
         f'<li><a href="/page/{escape(relative_path)}">{escape(str(metadata.get("title") or page.stem))}</a>'
@@ -381,7 +394,9 @@ def render_latest_ingest(repo_paths: RepoPaths, report) -> str:
         return ""
     source_page = next((page for page in entry.touched_pages if page.startswith("sources/")), None)
     related_pages = [page for page in entry.touched_pages if page.startswith("entities/") or page.startswith("concepts/")]
-    related_html = "".join(f"<li>{escape(page)}</li>" for page in related_pages[:6]) or "<li>No related pages yet.</li>"
+    related_html = "".join(
+        f'<li><a href="/page/{escape(page)}">{escape(page)}</a></li>' for page in related_pages[:6]
+    ) or "<li>No related pages yet.</li>"
     source_action = ""
     if source_page:
         source_action = f"""
@@ -390,13 +405,20 @@ def render_latest_ingest(repo_paths: RepoPaths, report) -> str:
           <a class="action-link action-link-muted" href="/open?kind=raw&path={escape(report.latest_processed_source or '')}&target=finder">Reveal raw source</a>
         </div>
         """
+    summary_intro, summary_points = split_activity_summary(entry.summary)
+    summary_html = ""
+    if summary_intro:
+        summary_html += f'<p class="meta-line summary-intro">{escape(summary_intro)}</p>'
+    if summary_points:
+        points_html = "".join(f"<li>{escape(point)}</li>" for point in summary_points)
+        summary_html += f'<ul class="summary-list">{points_html}</ul>'
     return f"""
     <section class="split split-tight">
       <div class="answer-panel">
         <p class="eyebrow">Latest ingest</p>
         <h2>{escape(entry.title)}</h2>
         <p class="meta-line">Raw source: <code>{escape(report.latest_processed_source or 'unknown')}</code></p>
-        <p class="meta-line">{escape(entry.summary)}</p>
+        {summary_html}
         {source_action}
       </div>
       <div class="status-card">
@@ -405,6 +427,23 @@ def render_latest_ingest(repo_paths: RepoPaths, report) -> str:
       </div>
     </section>
     """
+
+
+def split_activity_summary(summary: str) -> tuple[str, list[str]]:
+    intro_parts: list[str] = []
+    bullets: list[str] = []
+    for raw_line in summary.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("Raw source:") or stripped.startswith("Source page:"):
+            continue
+        if stripped.startswith("- "):
+            bullets.append(stripped[2:].strip())
+        else:
+            intro_parts.append(stripped)
+    intro = " ".join(intro_parts).strip()
+    return intro, bullets
 
 
 def resolve_open_target(repo_paths: RepoPaths, *, kind: str, path: str) -> Path:
