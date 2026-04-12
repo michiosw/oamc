@@ -8,6 +8,7 @@ import sys
 import threading
 from pathlib import Path
 
+from llm_wiki.health import build_doctor_report
 from llm_wiki import __version__
 from llm_wiki.config import load_config
 from llm_wiki.llm.openai_client import OpenAIWikiClient
@@ -186,6 +187,36 @@ def _terminate_existing_app() -> None:
     subprocess.run(["pkill", "-x", APP_NAME], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def restart_managed_app(base_dir: Path) -> None:
+    if launch_agent_path().exists():
+        subprocess.run(
+            ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{LAUNCH_AGENT_LABEL}"],
+            check=False,
+        )
+        return
+    if sys.executable.endswith(f"/{APP_NAME}"):
+        subprocess.Popen([sys.executable])
+        return
+    subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "llm_wiki.cli",
+            "menubar",
+            "--base-dir",
+            base_dir.as_posix(),
+        ]
+    )
+
+
+def reveal_installed_app(base_dir: Path) -> None:
+    reveal_target = app_bundle_path()
+    if reveal_target.exists():
+        subprocess.run(["open", "-R", reveal_target.as_posix()], check=False)
+        return
+    subprocess.run(["open", base_dir.as_posix()], check=False)
+
+
 def _run_launchctl(args: list[str], *, check: bool) -> None:
     subprocess.run(
         ["launchctl", *args],
@@ -243,11 +274,14 @@ def run_menubar(
             super().__init__(APP_NAME, quit_button=None)
             self.menu = [
                 "Status",
+                "Runtime",
                 None,
                 "Open Dashboard",
                 "Open Obsidian",
                 None,
                 "Process Inbox Now",
+                "Restart oamc",
+                "Reveal oamc.app",
                 "Open Repo",
                 None,
                 "Quit oamc",
@@ -255,6 +289,8 @@ def run_menubar(
             self.title = APP_NAME
             self._status_item = self.menu["Status"]
             self._status_item.set_callback(None)
+            self._runtime_item = self.menu["Runtime"]
+            self._runtime_item.set_callback(None)
             self._timer = rumps.Timer(self.refresh, 5)
             self._timer.start()
             self.refresh(None)
@@ -262,8 +298,12 @@ def run_menubar(
         def refresh(self, _sender) -> None:
             pending = inbox_count(repo_paths)
             heading = latest_log_heading(repo_paths) or "No activity yet"
+            report = build_doctor_report(config, repo_paths, host=host, port=port)
+            dashboard_check = next((check for check in report.checks if check.key == "dashboard"), None)
+            dashboard_state = "dashboard on" if dashboard_check and dashboard_check.status == "ok" else "dashboard off"
             self.title = f"{APP_NAME} · {pending}" if pending else APP_NAME
             self._status_item.title = f"Inbox: {pending} · {heading}"
+            self._runtime_item.title = f"Runtime: {dashboard_state} · watcher on · {report.overall_status}"
 
         @rumps.clicked("Open Dashboard")
         def open_dashboard(self, _sender) -> None:
@@ -295,6 +335,17 @@ def run_menubar(
         @rumps.clicked("Open Repo")
         def open_repo(self, _sender) -> None:
             subprocess.run(["open", repo_paths.base_dir.as_posix()], check=False)
+
+        @rumps.clicked("Restart oamc")
+        def restart_app(self, _sender) -> None:
+            restart_managed_app(repo_paths.base_dir)
+            stop_event.set()
+            dashboard.stop()
+            rumps.quit_application()
+
+        @rumps.clicked("Reveal oamc.app")
+        def reveal_app(self, _sender) -> None:
+            reveal_installed_app(repo_paths.base_dir)
 
         @rumps.clicked("Quit oamc")
         def quit_app(self, _sender) -> None:

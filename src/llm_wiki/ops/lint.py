@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from llm_wiki.health import index_drift, log_heading_issues, page_metadata_issues
 from llm_wiki.llm.base import LLMClient
 from llm_wiki.markdown import extract_wikilinks, link_target_for_path
 from llm_wiki.models import AppConfig, LintIssue, LintRequest, LintResult, RepoPaths
@@ -58,15 +59,28 @@ def run_lint(
             touched.append(relative_path)
             normalized_pages.append(relative_path)
 
+    index_missing_before, index_extra_before = index_drift(repo_paths)
+    metadata_issues = page_metadata_issues(repo_paths)
+    log_issues = log_heading_issues(repo_paths)
+
     issues = detect_issues(repo_paths)
     if not issues:
         rebuild_index(repo_paths)
         touched.append(repo_relative(repo_paths.index, repo_paths.base_dir))
+        detail_parts = ["No structural wiki issues were detected."]
+        if normalized_pages:
+            detail_parts.append(f"Normalized {len(normalized_pages)} page(s).")
+        if index_missing_before or index_extra_before:
+            detail_parts.append("Rebuilt index to remove drift.")
+        if metadata_issues:
+            detail_parts.append("Some wiki pages still have metadata issues.")
+        if log_issues:
+            detail_parts.append("wiki/log.md still has malformed headings.")
         append_log_entry(
             repo_paths,
             operation="lint",
             title="no-op",
-            summary="No structural wiki issues were detected.",
+            summary=" ".join(detail_parts),
             touched_pages=sorted(set(touched or ["wiki/index.md"])),
         )
         touched.append(repo_relative(repo_paths.log, repo_paths.base_dir))

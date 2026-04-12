@@ -5,6 +5,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+RESEARCH_TEMPLATES = (
+    "synthesis",
+    "compare",
+    "timeline",
+    "open-questions",
+    "decision-brief",
+)
+
 
 class PathsConfig(BaseModel):
     raw_inbox: str = "raw/inbox"
@@ -91,6 +99,7 @@ class IngestResult(BaseModel):
 
 class QueryRequest(BaseModel):
     question: str
+    template: Literal["synthesis", "compare", "timeline", "open-questions", "decision-brief"] = "synthesis"
     schema_text: str
     index_text: str
     candidates: list[SearchCandidate] = Field(default_factory=list)
@@ -108,6 +117,7 @@ class QueryResult(BaseModel):
     title: str = ""
     answer_preview: str = ""
     content: str = ""
+    template: str = "synthesis"
     selected_candidates: list[str] = Field(default_factory=list)
 
 
@@ -134,3 +144,29 @@ class LintResult(BaseModel):
     issues: list[LintIssue] = Field(default_factory=list)
     touched: list[str] = Field(default_factory=list)
     normalized_pages: list[str] = Field(default_factory=list)
+
+
+class HealthCheck(BaseModel):
+    key: str
+    label: str
+    status: Literal["ok", "warn", "error"]
+    detail: str
+    recommendation: str = ""
+
+
+class ActivityEntry(BaseModel):
+    heading: str
+    operation: str
+    title: str
+    summary: str
+    touched_pages: list[str] = Field(default_factory=list)
+
+
+class DoctorReport(BaseModel):
+    checks: list[HealthCheck] = Field(default_factory=list)
+    latest_log_heading: str | None = None
+    latest_processed_source: str | None = None
+    latest_ingest: ActivityEntry | None = None
+    clippings_files: list[str] = Field(default_factory=list)
+    overall_status: Literal["ok", "warn", "error"] = "ok"
+    recommended_next_step: str = "System healthy. Clip into raw/inbox/ and ask the wiki."

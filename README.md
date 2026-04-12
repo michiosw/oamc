@@ -84,6 +84,12 @@ That gives you:
 
 When you update `oamc`, run `uv run llm-wiki install-menubar` again once to refresh the installed app bundle.
 
+Check repo health any time:
+
+```bash
+uv run llm-wiki doctor
+```
+
 If you only want inbox automation without the dashboard:
 
 ```bash
@@ -94,6 +100,7 @@ Ask a question and get both a saved page and a terminal answer preview:
 
 ```bash
 uv run llm-wiki query "What does the wiki currently know about prompt engineering and frontend design?"
+uv run llm-wiki query "Compare the strongest ideas in the wiki about frontend design." --template compare
 ```
 
 Check current state any time:
@@ -130,7 +137,7 @@ Suggested workflow:
 2. Download its images into `raw/assets/` if needed
 3. Run `uv run llm-wiki process`
 4. Review the new wiki pages in Obsidian
-5. Ask questions with `uv run llm-wiki query "..."`
+5. Ask research questions with `uv run llm-wiki query "..." --template synthesis`
 6. Commit `raw/` and `wiki/` when the changes look good
 
 ## Daily commands
@@ -173,6 +180,7 @@ Suggested workflow:
 - Searches the wiki
 - Writes a synthesis page by default
 - Prints the answer preview directly in the terminal
+- Supports `--template` for research-oriented answer shapes
 - Supports `--scope` to focus on a source, concept, entity, or path fragment
 - Supports `--open` to open the saved synthesis page after writing
 
@@ -181,6 +189,13 @@ Suggested workflow:
 - Shows inbox count
 - Shows wiki page count
 - Shows the latest log entry
+- Shows health status and the next recommended action
+
+`uv run llm-wiki doctor`
+
+- Runs deterministic health checks
+- Warns about stray `Clippings/` markdown
+- Checks index drift, page metadata, log formatting, API key status, and runtime reachability
 
 `uv run llm-wiki serve`
 

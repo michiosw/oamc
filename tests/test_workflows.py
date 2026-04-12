@@ -6,6 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from llm_wiki.cli import app
+from llm_wiki.health import build_doctor_report
 from llm_wiki.llm.base import LLMClient
 from llm_wiki.models import (
     IngestRequest,
@@ -180,6 +181,8 @@ def test_cli_smoke_workflows(temp_workspace: Path, runner: CliRunner, monkeypatc
         [
             "query",
             "What are the main design patterns in my notes?",
+            "--template",
+            "decision-brief",
             "--base-dir",
             str(temp_workspace),
         ],
@@ -188,6 +191,7 @@ def test_cli_smoke_workflows(temp_workspace: Path, runner: CliRunner, monkeypatc
     assert (temp_workspace / "wiki" / "syntheses" / "design-patterns.md").exists()
     assert "# Design Patterns" in result.output
     assert "compiled wiki" in result.output
+    assert "Template: decision-brief" in result.output
 
     result = runner.invoke(app, ["lint", "--base-dir", str(temp_workspace)])
     assert result.exit_code == 0, result.output
@@ -367,6 +371,46 @@ def test_status_command_reports_counts(temp_workspace: Path, runner: CliRunner) 
     assert result.exit_code == 0, result.output
     assert "LLM Wiki Status" in result.output
     assert "Inbox files: 0" in result.output
+    assert "Health:" in result.output
+
+
+def test_doctor_reports_missing_api_key_and_clippings(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    clippings_note = temp_workspace / "Clippings" / "stray.md"
+    clippings_note.parent.mkdir(parents=True, exist_ok=True)
+    clippings_note.write_text("# Stray\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["doctor", "--base-dir", str(temp_workspace)])
+    assert result.exit_code == 0, result.output
+    assert "Doctor report" in result.output
+    assert "OpenAI API key: error" in result.output
+    assert "Clipper destination: warn" in result.output
+
+
+def test_doctor_report_detects_index_drift_and_malformed_page(temp_workspace: Path, monkeypatch) -> None:
+    from llm_wiki.ops.common import default_page
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    good_page = temp_workspace / "wiki" / "concepts" / "frontend-design.md"
+    good_page.write_text(
+        default_page(
+            "concepts/frontend-design.md",
+            "Frontend Design",
+            "# Frontend Design\n\nBody.\n\n## Sources\n- raw/sources/example.md",
+        ),
+        encoding="utf-8",
+    )
+    bad_page = temp_workspace / "wiki" / "concepts" / "bad.md"
+    bad_page.write_text("# Bad page\n\nNo frontmatter.\n", encoding="utf-8")
+    (temp_workspace / "wiki" / "index.md").write_text("# Wiki Index\n\n## Concepts\n\nNo pages yet.\n", encoding="utf-8")
+
+    config, repo_paths = load_config(temp_workspace)
+    report = build_doctor_report(config, repo_paths)
+
+    index_check = next(check for check in report.checks if check.key == "index-drift")
+    page_check = next(check for check in report.checks if check.key == "page-metadata")
+    assert index_check.status == "warn"
+    assert page_check.status == "warn"
 
 
 def test_query_scope_filters_context(temp_workspace: Path) -> None:
@@ -398,11 +442,14 @@ def test_query_scope_filters_context(temp_workspace: Path) -> None:
         client,
         "Summarize GPT-5.4",
         write_page=True,
+        template="compare",
         scopes=["entities/gpt-5-4"],
     )
 
     assert result.page_path == "syntheses/scoped-answer.md"
+    assert result.template == "compare"
     assert client.last_request is not None
+    assert client.last_request.template == "compare"
     assert [candidate.relative_path for candidate in client.last_request.candidates] == [
         "entities/gpt-5-4.md"
     ]

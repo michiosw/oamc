@@ -5,16 +5,19 @@ from html import escape
 import re
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from markdown_it import MarkdownIt
 
 from llm_wiki.config import load_config
+from llm_wiki.health import build_doctor_report
 from llm_wiki.llm.openai_client import OpenAIWikiClient
 from llm_wiki.markdown import extract_wikilinks, link_target_for_path, load_markdown, parse_markdown
-from llm_wiki.models import RepoPaths
+from llm_wiki.models import RESEARCH_TEMPLATES, RepoPaths
+from llm_wiki.obsidian import open_in_obsidian, reveal_in_finder
 from llm_wiki.ops.query import run_query
 from llm_wiki.ops.search import iter_wiki_pages, search_pages
+from llm_wiki.paths import repo_relative
 
 
 BODY_FONT = '"Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif'
@@ -49,10 +52,11 @@ def create_dashboard_app(repo_paths: RepoPaths) -> FastAPI:
         return render_layout(relative_path, body)
 
     @app.get("/ask", response_class=HTMLResponse)
-    def ask(q: str = Query(""), scope: str = Query("")) -> str:
+    def ask(q: str = Query(""), scope: str = Query(""), template: str = Query("synthesis")) -> str:
         question = q.strip()
+        template = template if template in RESEARCH_TEMPLATES else "synthesis"
         if not question:
-            return render_layout("Ask", render_ask_form())
+            return render_layout("Ask", render_ask_form(template=template))
 
         config, _ = load_config(repo_paths.base_dir)
         scopes = [item.strip() for item in scope.split(",") if item.strip()]
@@ -63,13 +67,28 @@ def create_dashboard_app(repo_paths: RepoPaths) -> FastAPI:
                 OpenAIWikiClient(config),
                 question,
                 write_page=True,
+                template=template,
                 top_k=config.search.default_top_k,
                 scopes=scopes,
             )
-            body = render_ask_result(question, scope, result)
+            body = render_ask_result(repo_paths, question, scope, template, result)
         except RuntimeError as exc:
-            body = render_ask_error(question, scope, str(exc))
+            body = render_ask_error(question, scope, template, str(exc))
         return render_layout(f"Ask: {question}", body, q=question)
+
+    @app.get("/open")
+    def open_target(
+        request: Request,
+        kind: str = Query(...),
+        path: str = Query(...),
+        target: str = Query("obsidian"),
+    ) -> RedirectResponse:
+        absolute = resolve_open_target(repo_paths, kind=kind, path=path)
+        if target == "finder":
+            reveal_in_finder(absolute)
+        else:
+            open_in_obsidian(repo_paths.base_dir, absolute)
+        return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
 
     return app
 
@@ -84,6 +103,8 @@ def normalize_page_path(page_path: str) -> str:
 
 
 def render_home(repo_paths: RepoPaths) -> str:
+    config, _ = load_config(repo_paths.base_dir)
+    report = build_doctor_report(config, repo_paths)
     pages = sorted(iter_wiki_pages(repo_paths), key=lambda path: path.stat().st_mtime, reverse=True)
     recent = pages[:8]
     stats = {
@@ -99,17 +120,19 @@ def render_home(repo_paths: RepoPaths) -> str:
     )
     recent_html = "".join(render_page_list_item(repo_paths, page) for page in recent) or "<li>No pages yet.</li>"
     inbox_count = len(list(repo_paths.raw_inbox.glob("*")))
+    latest_ingest_html = render_latest_ingest(repo_paths, report)
+    health_html = render_health_surface(repo_paths, report, inbox_count)
     return f"""
     <section class="hero-grid">
       <div class="hero">
         <p class="eyebrow">Local wiki workspace</p>
-        <h1>Browse the knowledge base without leaving the repo.</h1>
-        <p class="lede">Clip into the inbox, let the watcher process it, then ask the wiki directly here.</p>
+        <h1>Research against the wiki, not against scattered notes.</h1>
+        <p class="lede">Clip into <code>raw/inbox/</code>, let the watcher process it, then ask one bounded research question at a time.</p>
       </div>
       <div class="hero-note">
-        <p class="eyebrow">Studio loop</p>
-        <p class="meta-line">Clip into <code>raw/inbox/</code>. The watcher ingests it. The wiki stays current while you read and ask.</p>
-        <p class="meta-line">Run <code>uv run llm-wiki start</code> once and leave it open.</p>
+        <p class="eyebrow">Official workflow</p>
+        <p class="meta-line">The supported ingest path is <code>raw/inbox/</code>. Anything left in <code>Clippings/</code> is outside the pipeline.</p>
+        <p class="meta-line">On macOS, the canonical runtime is <code>uv run llm-wiki install-menubar</code>.</p>
       </div>
     </section>
     {render_ask_form(compact=True)}
@@ -120,27 +143,36 @@ def render_home(repo_paths: RepoPaths) -> str:
         <ul class="page-list">{recent_html}</ul>
       </div>
       <div>
-        <h2>Workspace status</h2>
-        <p class="meta-line">Inbox files: <strong>{inbox_count}</strong></p>
-        <p class="meta-line">Vault root: <code>{escape(repo_paths.base_dir.as_posix())}</code></p>
-        <p class="meta-line">Use <code>uv run llm-wiki start</code> if you want the dashboard and inbox watch running together.</p>
+        {health_html}
       </div>
     </section>
+    {latest_ingest_html}
     """
 
 
-def render_ask_form(question: str = "", scope: str = "", *, compact: bool = False) -> str:
+def render_ask_form(
+    question: str = "",
+    scope: str = "",
+    template: str = "synthesis",
+    *,
+    compact: bool = False,
+) -> str:
     panel_class = "ask-panel ask-panel-compact" if compact else "ask-panel"
+    template_options = "".join(
+        f'<option value="{escape(option)}"{" selected" if option == template else ""}>{escape(render_template_label(option))}</option>'
+        for option in RESEARCH_TEMPLATES
+    )
     return f"""
     <section class="{panel_class}">
-      <p class="eyebrow">Ask the wiki</p>
-      <h2>Write once, save the answer, keep moving.</h2>
+      <p class="eyebrow">Research mode</p>
+      <h2>Ask what the wiki currently knows.</h2>
       <form action="/ask" method="get" class="ask-form">
         <input type="search" name="q" value="{escape(question)}" placeholder="What does the wiki currently know about..." required>
         <input type="text" name="scope" value="{escape(scope)}" placeholder="Optional scope: gpt-5-4, frontend-design">
+        <select name="template">{template_options}</select>
         <button type="submit">Ask</button>
       </form>
-      <p class="helper">Every question writes a synthesis page and updates the wiki index automatically.</p>
+      <p class="helper">Every serious question writes a synthesis page, updates the index, and is meant to be continued in Obsidian.</p>
     </section>
     """
 
@@ -171,19 +203,28 @@ def render_search(repo_paths: RepoPaths, query: str) -> str:
     """
 
 
-def render_ask_result(question: str, scope: str, result) -> str:
+def render_ask_result(repo_paths: RepoPaths, question: str, scope: str, template: str, result) -> str:
     context_html = "".join(f"<li>{escape(candidate)}</li>" for candidate in result.selected_candidates) or "<li>No context pages were selected.</li>"
     saved_html = (
         f'<p class="meta-line">Saved to <a href="/page/{escape(result.page_path)}">{escape(result.page_path)}</a></p>'
         if result.page_path
         else ""
     )
+    action_html = ""
+    if result.page_path:
+        action_html = f"""
+        <div class="action-row">
+          <a class="action-link" href="/open?kind=wiki&path={escape(result.page_path)}&target=obsidian">Open in Obsidian</a>
+          <a class="action-link action-link-muted" href="/open?kind=wiki&path={escape(result.page_path)}&target=finder">Reveal in Finder</a>
+        </div>
+        """
     return f"""
-    {render_ask_form(question, scope)}
+    {render_ask_form(question, scope, template)}
     <section class="answer-panel">
-      <p class="eyebrow">Answer</p>
+      <p class="eyebrow">Saved synthesis</p>
       <h1>{escape(result.title)}</h1>
       {saved_html}
+      {action_html}
       <div class="answer-copy">{render_markdown(result.answer_preview)}</div>
     </section>
     <section class="split">
@@ -193,16 +234,16 @@ def render_ask_result(question: str, scope: str, result) -> str:
       </div>
       <div>
         <h2>What happened</h2>
-        <p class="meta-line">The answer was saved back into <code>wiki/syntheses/</code>.</p>
-        <p class="meta-line">Open the saved page in Obsidian if you want to keep exploring from there.</p>
+        <p class="meta-line">The saved synthesis is the primary artifact. The inline answer is only a preview.</p>
+        <p class="meta-line">Keep exploring from the saved page in Obsidian, not from transient chat context.</p>
       </div>
     </section>
     """
 
 
-def render_ask_error(question: str, scope: str, message: str) -> str:
+def render_ask_error(question: str, scope: str, template: str, message: str) -> str:
     return f"""
-    {render_ask_form(question, scope)}
+    {render_ask_form(question, scope, template)}
     <section class="answer-panel">
       <p class="eyebrow">Query failed</p>
       <h1>Could not ask the wiki yet.</h1>
@@ -227,11 +268,18 @@ def render_page(repo_paths: RepoPaths, target: Path) -> str:
         for key, value in metadata.items()
         if key in {"type", "created", "updated", "status"}
     )
+    actions = f"""
+    <div class="action-row">
+      <a class="action-link" href="/open?kind=wiki&path={escape(relative_path)}&target=obsidian">Open in Obsidian</a>
+      <a class="action-link action-link-muted" href="/open?kind=wiki&path={escape(relative_path)}&target=finder">Reveal in Finder</a>
+    </div>
+    """
     return f"""
     <article class="page">
       <p class="eyebrow">{escape(relative_path)}</p>
       <h1>{escape(title)}</h1>
       <ul class="meta-list">{metadata_html}</ul>
+      {actions}
       <div class="markdown-body">{rendered}</div>
     </article>
     <aside class="sidebar">
@@ -284,6 +332,83 @@ def render_page_list_item(repo_paths: RepoPaths, page: Path) -> str:
         f'<div class="result-path">{escape(relative_path)} · {escape(date_label)}</div>'
         f'<p class="result-summary">{escape(summary)}</p></li>'
     )
+
+
+def render_template_label(template: str) -> str:
+    return template.replace("-", " ").title()
+
+
+def render_health_surface(repo_paths: RepoPaths, report, inbox_count: int) -> str:
+    clippings_note = ""
+    if report.clippings_files:
+        clippings_note = (
+            f'<p class="status-warn">Found {len(report.clippings_files)} markdown file(s) in <code>Clippings/</code>. '
+            "Retarget Web Clipper to <code>raw/inbox/</code>.</p>"
+        )
+    index_check = next((check for check in report.checks if check.key == "index-drift"), None)
+    runtime_check = next((check for check in report.checks if check.key == "dashboard"), None)
+    return f"""
+    <section class="status-card">
+      <p class="eyebrow">Inbox health</p>
+      <h2>Workspace status</h2>
+      <p class="meta-line">Inbox files: <strong>{inbox_count}</strong></p>
+      <p class="meta-line">Latest source: <code>{escape(report.latest_processed_source or 'none yet')}</code></p>
+      <p class="meta-line">Latest log: {escape(report.latest_log_heading or 'none yet')}</p>
+      <p class="meta-line">Index: <strong>{escape(index_check.detail if index_check else 'unknown')}</strong></p>
+      <p class="meta-line">Runtime: <strong>{escape(runtime_check.detail if runtime_check else 'unknown')}</strong></p>
+      {clippings_note}
+      <p class="meta-line">Next step: {escape(report.recommended_next_step)}</p>
+    </section>
+    """
+
+
+def render_latest_ingest(repo_paths: RepoPaths, report) -> str:
+    entry = report.latest_ingest
+    if not entry:
+        return ""
+    source_page = next((page for page in entry.touched_pages if page.startswith("sources/")), None)
+    related_pages = [page for page in entry.touched_pages if page.startswith("entities/") or page.startswith("concepts/")]
+    related_html = "".join(f"<li>{escape(page)}</li>" for page in related_pages[:6]) or "<li>No related pages yet.</li>"
+    source_action = ""
+    if source_page:
+        source_action = f"""
+        <div class="action-row">
+          <a class="action-link" href="/open?kind=wiki&path={escape(source_page)}&target=obsidian">Open source page</a>
+          <a class="action-link action-link-muted" href="/open?kind=raw&path={escape(report.latest_processed_source or '')}&target=finder">Reveal raw source</a>
+        </div>
+        """
+    return f"""
+    <section class="split split-tight">
+      <div class="answer-panel">
+        <p class="eyebrow">Latest ingest</p>
+        <h2>{escape(entry.title)}</h2>
+        <p class="meta-line">Raw source: <code>{escape(report.latest_processed_source or 'unknown')}</code></p>
+        <p class="meta-line">{escape(entry.summary)}</p>
+        {source_action}
+      </div>
+      <div class="status-card">
+        <p class="eyebrow">Touched pages</p>
+        <ul class="link-list">{related_html}</ul>
+      </div>
+    </section>
+    """
+
+
+def resolve_open_target(repo_paths: RepoPaths, *, kind: str, path: str) -> Path:
+    if kind == "wiki":
+        relative_path = normalize_page_path(path)
+        target = repo_paths.wiki_root / relative_path
+    elif kind == "raw":
+        relative_path = path.lstrip("/")
+        target = repo_paths.base_dir / relative_path
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported open target")
+    target = target.resolve()
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Target not found")
+    if repo_paths.base_dir.resolve() not in target.parents and target != repo_paths.base_dir.resolve():
+        raise HTTPException(status_code=400, detail="Target is outside the repo")
+    return target
 
 
 def render_layout(title: str, body: str, *, q: str = "") -> str:
@@ -459,7 +584,8 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       margin-top: 20px;
     }}
     .ask-form input[type="search"],
-    .ask-form input[type="text"] {{
+    .ask-form input[type="text"],
+    .ask-form select {{
       width: 100%;
       border: 1px solid var(--border);
       background: rgba(255,255,255,0.72);
@@ -488,6 +614,9 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       display: grid;
       grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
       gap: 28px;
+    }}
+    .split-tight {{
+      gap: 20px;
     }}
     .page-list, .result-list, .link-list {{
       list-style: none;
@@ -554,6 +683,45 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
     }}
     .answer-copy {{
       font-size: 1.05rem;
+    }}
+    .status-card {{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }}
+    .status-warn {{
+      margin: 12px 0;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(150, 90, 56, 0.10);
+      color: #7d4a29;
+    }}
+    .action-row {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 12px 0 16px;
+    }}
+    .action-link {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      background: var(--text);
+      color: white;
+      padding: 10px 14px;
+      text-decoration: none;
+      font-size: 0.95rem;
+    }}
+    .action-link:hover {{
+      background: var(--accent);
+      text-decoration: none;
+    }}
+    .action-link-muted {{
+      background: rgba(25, 23, 19, 0.08);
+      color: var(--text);
     }}
     .answer-copy > :first-child {{
       margin-top: 0;

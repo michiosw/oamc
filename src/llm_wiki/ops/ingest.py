@@ -110,11 +110,17 @@ def ingest_sources(
             concept_pages.append(page_path)
         index_text = rebuild_index(repo_paths)
         touched.append(repo_relative(repo_paths.index, repo_paths.base_dir))
+        summary = response.notes.strip() if response.notes.strip() else f"Ingested {stored_relative} into the wiki."
+        summary = (
+            f"{summary}\n"
+            f"Raw source: {stored_relative}\n"
+            f"Source page: [[{source_page_path[:-3]}]]"
+        )
         append_log_entry(
             repo_paths,
             operation="ingest",
             title=storage_destination.stem,
-            summary=response.notes or f"Ingested {stored_relative} into the wiki.",
+            summary=summary,
             touched_pages=sorted(set(touched)),
         )
         _store_source(repo_paths, source_path, storage_destination)

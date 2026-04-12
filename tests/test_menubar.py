@@ -88,3 +88,35 @@ def test_install_and_uninstall_launch_agent(tmp_path: Path, monkeypatch) -> None
     assert removed_app_path == app_path
     assert not agent_path.exists()
     assert not app_path.exists()
+
+
+def test_restart_managed_app_prefers_launch_agent(tmp_path: Path, monkeypatch) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(menubar, "launch_agent_path", lambda home=None: tmp_path / "dev.oamc.studio.plist")
+    (tmp_path / "dev.oamc.studio.plist").write_text("", encoding="utf-8")
+    monkeypatch.setattr(menubar.subprocess, "run", lambda args, check=False, **kwargs: calls.append(args))
+
+    menubar.restart_managed_app(tmp_path)
+
+    assert calls == [["launchctl", "kickstart", "-k", f"gui/{menubar.os.getuid()}/{menubar.LAUNCH_AGENT_LABEL}"]]
+
+
+def test_reveal_installed_app_reveals_bundle_or_repo(tmp_path: Path, monkeypatch) -> None:
+    calls: list[list[str]] = []
+    apps_dir = tmp_path / "Applications"
+    bundle = apps_dir / menubar.APP_BUNDLE_NAME
+    (bundle / "Contents").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(menubar, "app_bundle_path", lambda home=None: bundle)
+    monkeypatch.setattr(menubar.subprocess, "run", lambda args, check=False, **kwargs: calls.append(args))
+
+    menubar.reveal_installed_app(tmp_path / "repo")
+    assert calls[-1] == ["open", "-R", bundle.as_posix()]
+
+    shutil_target = tmp_path / "repo"
+    calls.clear()
+    bundle.unlink(missing_ok=True) if bundle.is_file() else None
+    import shutil
+
+    shutil.rmtree(bundle.parent, ignore_errors=True)
+    menubar.reveal_installed_app(shutil_target)
+    assert calls[-1] == ["open", shutil_target.as_posix()]

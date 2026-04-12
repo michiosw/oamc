@@ -16,6 +16,7 @@ def run_query(
     question: str,
     *,
     write_page: bool,
+    template: str = "synthesis",
     top_k: int | None = None,
     scopes: list[str] | None = None,
 ) -> QueryResult:
@@ -32,6 +33,7 @@ def run_query(
     )
     request = QueryRequest(
         question=question,
+        template=template,
         schema_text=(repo_paths.config_dir / "schema.md").read_text(encoding="utf-8"),
         index_text=repo_paths.index.read_text(encoding="utf-8"),
         candidates=candidates,
@@ -67,5 +69,6 @@ def run_query(
         title=title,
         answer_preview=answer_preview,
         content=response.page.content,
+        template=template,
         selected_candidates=[candidate.relative_path for candidate in candidates],
     )

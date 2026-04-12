@@ -9,9 +9,12 @@ from pathlib import Path
 import typer
 
 from llm_wiki.config import load_config, write_default_config
+from llm_wiki.health import build_doctor_report
 from llm_wiki.llm.base import LLMClient
 from llm_wiki.llm.openai_client import OpenAIWikiClient
 from llm_wiki.menubar import install_launch_agent, run_menubar, uninstall_launch_agent
+from llm_wiki.models import RESEARCH_TEMPLATES
+from llm_wiki.obsidian import open_in_obsidian
 from llm_wiki.ops.ingest import ingest_sources
 from llm_wiki.ops.lint import run_lint
 from llm_wiki.ops.query import run_query
@@ -112,6 +115,7 @@ def _last_log_heading(log_path: Path) -> str | None:
 def _print_query_result(result) -> None:
     if result.page_path:
         typer.echo(f"Saved page: {result.page_path}")
+    typer.echo(f"Template: {result.template}")
     typer.echo("")
     typer.echo(f"# {result.title}")
     typer.echo("")
@@ -126,7 +130,21 @@ def _print_query_result(result) -> None:
 
 def _open_path(base_dir: Path, relative_path: str) -> None:
     absolute = (base_dir / "wiki" / relative_path.replace("wiki/", "")).resolve()
-    subprocess.run(["open", absolute.as_posix()], check=False)
+    open_in_obsidian(base_dir, absolute)
+
+
+def _print_doctor_report(report) -> None:
+    typer.echo("Doctor report")
+    typer.echo(f"- Overall: {report.overall_status}")
+    if report.latest_processed_source:
+        typer.echo(f"- Latest source: {report.latest_processed_source}")
+    if report.latest_log_heading:
+        typer.echo(f"- Latest log: {report.latest_log_heading}")
+    typer.echo("")
+    for check in report.checks:
+        typer.echo(f"- {check.label}: {check.status} — {check.detail}")
+    typer.echo("")
+    typer.echo(f"Recommended next step: {report.recommended_next_step}")
 
 
 def _emit(message: str) -> None:
@@ -177,11 +195,15 @@ def query(
     question: str = typer.Argument(...),
     write_page: bool = typer.Option(True, "--write-page/--no-write-page"),
     show_answer: bool = typer.Option(True, "--show-answer/--no-show-answer"),
+    template: str = typer.Option("synthesis", "--template"),
     scope: list[str] = typer.Option(None, "--scope"),
     top_k: int = typer.Option(6, "--top-k", min=1),
     open_page: bool = typer.Option(False, "--open"),
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
+    if template not in RESEARCH_TEMPLATES:
+        typer.echo(f"Unsupported template: {template}. Choose from: {', '.join(RESEARCH_TEMPLATES)}")
+        raise typer.Exit(code=1)
     config, repo_paths = load_config(base_dir)
     client = build_client_or_exit(config)
     result = run_query(
@@ -190,6 +212,7 @@ def query(
         client,
         question,
         write_page=write_page,
+        template=template,
         top_k=top_k,
         scopes=scope,
     )
@@ -248,20 +271,35 @@ def process(
 def status(
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
-    _, repo_paths = load_config(base_dir)
+    config, repo_paths = load_config(base_dir)
     inbox_paths = sorted(repo_paths.raw_inbox.glob("*"))
     total_pages = len(iter_wiki_pages(repo_paths))
-    last_log = _last_log_heading(repo_paths.log)
+    report = build_doctor_report(config, repo_paths)
 
     typer.echo("LLM Wiki Status")
     typer.echo(f"- Inbox files: {len(inbox_paths)}")
     typer.echo(f"- Wiki pages: {total_pages}")
-    typer.echo(f"- Last log entry: {last_log or 'none'}")
+    typer.echo(f"- Last log entry: {report.latest_log_heading or 'none'}")
+    typer.echo(f"- Health: {report.overall_status}")
+    typer.echo(f"- Recommended next step: {report.recommended_next_step}")
+    if report.clippings_files:
+        typer.echo("- Warning: stray markdown exists in Clippings/. Retarget Web Clipper to raw/inbox/.")
     if inbox_paths:
         _render_list(
             "Inbox:",
             [repo_relative(path, repo_paths.base_dir) for path in inbox_paths],
         )
+
+
+@app.command()
+def doctor(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8421, "--port", min=1, max=65535),
+    base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
+) -> None:
+    config, repo_paths = load_config(base_dir)
+    report = build_doctor_report(config, repo_paths, host=host, port=port)
+    _print_doctor_report(report)
 
 
 @app.command()

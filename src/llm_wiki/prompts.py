@@ -2,6 +2,14 @@ from __future__ import annotations
 
 from llm_wiki.models import IngestRequest, LintRequest, QueryRequest, SearchCandidate
 
+QUERY_TEMPLATE_INSTRUCTIONS = {
+    "synthesis": "Write a synthesis page that answers the question directly, then expands with analysis and implications.",
+    "compare": "Write a comparison-focused synthesis page. Highlight the main dimensions, tradeoffs, and strongest contrasts before implications.",
+    "timeline": "Write a chronology-focused synthesis page. Emphasize what changed over time, sequence, and transitions.",
+    "open-questions": "Write a synthesis page that separates what is known from what remains uncertain. End with the highest-value next questions.",
+    "decision-brief": "Write a decision-oriented synthesis page. Lead with a recommendation, rationale, risks, and next steps.",
+}
+
 
 def _format_candidates(candidates: list[SearchCandidate]) -> str:
     if not candidates:
@@ -46,6 +54,7 @@ def build_query_prompts(request: QueryRequest) -> tuple[str, str]:
         "You answer questions against a maintained markdown wiki. Return a single "
         "synthesis page as structured markdown with YAML frontmatter and a Sources section."
     )
+    template_instruction = QUERY_TEMPLATE_INSTRUCTIONS.get(request.template, QUERY_TEMPLATE_INSTRUCTIONS["synthesis"])
     context_blocks = "\n\n".join(
         f"### {path}\n{content}" for path, content in request.page_contexts.items()
     )
@@ -57,6 +66,12 @@ Current index:
 
 Question:
 {request.question}
+
+Template:
+{request.template}
+
+Template instruction:
+{template_instruction}
 
 Candidate pages:
 {_format_candidates(request.candidates)}
