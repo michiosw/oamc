@@ -282,23 +282,23 @@ def run_menubar(
             super().__init__(APP_NAME, quit_button=None)
             self.menu = [
                 "Status",
-                "Runtime",
+                "Last Activity",
                 None,
                 "Open Dashboard",
-                "Open Obsidian",
+                "Open Vault in Obsidian",
+                "Show Workspace Folder",
                 None,
-                "Process Inbox Now",
-                "Restart oamc",
-                "Reveal oamc.app",
-                "Open Repo",
+                "Process Inbox",
+                "Restart App",
+                "Show Installed App",
                 None,
-                "Quit oamc",
+                "Quit",
             ]
             self.title = APP_NAME
             self._status_item = cast(Any, self.menu)["Status"]
             self._status_item.set_callback(None)
-            self._runtime_item = cast(Any, self.menu)["Runtime"]
-            self._runtime_item.set_callback(None)
+            self._activity_item = cast(Any, self.menu)["Last Activity"]
+            self._activity_item.set_callback(None)
             self._timer = rumps.Timer(self.refresh, 5)
             self._timer.start()
             self.refresh(None)
@@ -307,21 +307,23 @@ def run_menubar(
             pending = inbox_count(repo_paths)
             heading = latest_log_heading(repo_paths) or "No activity yet"
             report = build_doctor_report(config, repo_paths, host=host, port=port)
-            dashboard_check = next((check for check in report.checks if check.key == "dashboard"), None)
-            dashboard_state = "dashboard on" if dashboard_check and dashboard_check.status == "ok" else "dashboard off"
             self.title = f"{APP_NAME} · {pending}" if pending else APP_NAME
-            self._status_item.title = f"Inbox: {pending} · {heading}"
-            self._runtime_item.title = f"Runtime: {dashboard_state} · watcher on · {report.overall_status}"
+            self._status_item.title = _menu_status_title(report.overall_status, pending)
+            self._activity_item.title = f"Last activity: {_short_activity_label(heading)}"
 
         @rumps.clicked("Open Dashboard")
         def open_dashboard(self, _sender: object) -> None:
             subprocess.run(["open", dashboard.url], check=False)
 
-        @rumps.clicked("Open Obsidian")
+        @rumps.clicked("Open Vault in Obsidian")
         def open_obsidian(self, _sender: object) -> None:
             subprocess.run(["open", "-a", "Obsidian", repo_paths.base_dir.as_posix()], check=False)
 
-        @rumps.clicked("Process Inbox Now")
+        @rumps.clicked("Show Workspace Folder")
+        def open_repo(self, _sender: object) -> None:
+            subprocess.run(["open", repo_paths.base_dir.as_posix()], check=False)
+
+        @rumps.clicked("Process Inbox")
         def process_now(self, _sender: object) -> None:
             def _task() -> None:
                 try:
@@ -340,25 +342,40 @@ def run_menubar(
 
             threading.Thread(target=_task, daemon=True, name="llm-wiki-process-now").start()
 
-        @rumps.clicked("Open Repo")
-        def open_repo(self, _sender: object) -> None:
-            subprocess.run(["open", repo_paths.base_dir.as_posix()], check=False)
-
-        @rumps.clicked("Restart oamc")
+        @rumps.clicked("Restart App")
         def restart_app(self, _sender: object) -> None:
             restart_managed_app(repo_paths.base_dir)
             stop_event.set()
             dashboard.stop()
             rumps.quit_application()
 
-        @rumps.clicked("Reveal oamc.app")
+        @rumps.clicked("Show Installed App")
         def reveal_app(self, _sender: object) -> None:
             reveal_installed_app(repo_paths.base_dir)
 
-        @rumps.clicked("Quit oamc")
+        @rumps.clicked("Quit")
         def quit_app(self, _sender: object) -> None:
             stop_event.set()
             dashboard.stop()
             rumps.quit_application()
 
     OAMCMenuBar().run()
+
+
+def _menu_status_title(overall_status: str, pending: int) -> str:
+    state = "Healthy" if overall_status == "ok" else "Needs attention"
+    if pending:
+        return f"Status: {state} · {pending} in inbox"
+    return f"Status: {state} · inbox clear"
+
+
+def _short_activity_label(heading: str) -> str:
+    if heading == "No activity yet":
+        return heading
+    if "] " in heading:
+        heading = heading.split("] ", 1)[1]
+    operation, _, title = heading.partition(" | ")
+    if title:
+        shortened = title if len(title) <= 42 else f"{title[:39].rstrip()}..."
+        return f"{operation} · {shortened}"
+    return heading

@@ -120,3 +120,10 @@ def test_reveal_installed_app_reveals_bundle_or_repo(tmp_path: Path, monkeypatch
     shutil.rmtree(bundle.parent, ignore_errors=True)
     menubar.reveal_installed_app(shutil_target)
     assert calls[-1] == ["open", shutil_target.as_posix()]
+
+
+def test_menu_status_and_activity_labels_are_human_friendly() -> None:
+    assert menubar._menu_status_title("ok", 0) == "Status: Healthy · inbox clear"
+    assert menubar._menu_status_title("warn", 2) == "Status: Needs attention · 2 in inbox"
+    assert menubar._short_activity_label("[2026-04-13] query | What does the wiki currently know about preparing Codex for Xcode and Swift projects?") == "query · What does the wiki currently know about..."
+    assert menubar._short_activity_label("No activity yet") == "No activity yet"
