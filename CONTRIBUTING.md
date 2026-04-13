@@ -47,6 +47,7 @@ uv run llm-wiki doctor
 
 - Use semver.
 - Use conventional commits such as `feat:`, `fix:`, `chore:`, or `docs:`.
+- Releases are managed by `release-please`. Do not hand-edit versions or cut manual release tags in the normal workflow.
 
 ## Pull requests
 

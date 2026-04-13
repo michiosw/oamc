@@ -98,6 +98,14 @@ python3 -m compileall src tests
 uv run llm-wiki doctor
 ```
 
+## Releases
+
+This repo uses `release-please` for versioning and GitHub Releases.
+
+- Merge conventional commits into `main`
+- Let `release-please` open or update the release PR
+- Merge the release PR to cut the next version and publish the GitHub release
+
 ## Notes
 
 - `raw/inbox/` is the only supported clipping destination
