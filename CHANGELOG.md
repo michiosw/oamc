@@ -7,6 +7,18 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-04-13
+
+### Changed
+
+- Simplified the macOS menubar actions and status labels so the app reads like a product instead of a debug menu
+
+### Fixed
+
+- Placeholder `gitkeep` artifacts are now ignored across ingest, search, dashboard, and health reporting
+- Doctor and dashboard now prefer real wiki activity over stale placeholder history
+- `Sources` normalization no longer leaves duplicate trailing sections behind in existing pages
+
 ## [0.4.0] - 2026-04-13
 
 ### Added
