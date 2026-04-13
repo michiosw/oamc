@@ -19,7 +19,7 @@ from llm_wiki.core.models import (
     RepoPaths,
     ResearchTemplate,
 )
-from llm_wiki.core.paths import ensure_structure, repo_relative
+from llm_wiki.core.paths import ensure_structure, is_placeholder_artifact, repo_relative
 from llm_wiki.core.telemetry import configure_logging, get_logger, log_event
 from llm_wiki.integrations.menubar import install_launch_agent, run_menubar, uninstall_launch_agent
 from llm_wiki.integrations.obsidian import open_in_obsidian
@@ -191,7 +191,7 @@ def ingest(
 ) -> None:
     config, repo_paths = load_config_or_exit(base_dir)
     log_event(LOGGER, "command_started", command="ingest", base_dir=repo_paths.base_dir)
-    paths = source_paths or sorted(repo_paths.raw_inbox.glob("*"))
+    paths = [path for path in (source_paths or sorted(repo_paths.raw_inbox.glob("*"))) if not is_placeholder_artifact(path)]
     if not paths:
         typer.echo("Inbox is empty. Drop files into raw/inbox/ first.")
         raise typer.Exit()

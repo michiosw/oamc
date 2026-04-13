@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from llm_wiki.core.models import AppConfig, RepoPaths
@@ -14,6 +15,7 @@ REQUIRED_DIRS = (
     "wiki/sources",
     "wiki/syntheses",
 )
+PLACEHOLDER_NAME_RE = re.compile(r"^(?:\.?gitkeep|keep)(?:-\d+)?(?:\.md)?$", re.IGNORECASE)
 
 
 def find_base_dir(start: Path | None = None) -> Path:
@@ -45,3 +47,24 @@ def ensure_structure(base_dir: Path) -> None:
 
 def repo_relative(path: Path, base_dir: Path) -> str:
     return path.resolve().relative_to(base_dir.resolve()).as_posix()
+
+
+def is_placeholder_artifact(path: Path) -> bool:
+    name = path.name.lower()
+    stem = path.stem.lower().lstrip(".")
+    normalized_name = re.sub(r"^\d{8}-", "", name)
+    normalized_stem = re.sub(r"^\d{8}-", "", stem)
+    if (
+        PLACEHOLDER_NAME_RE.match(name)
+        or PLACEHOLDER_NAME_RE.match(stem)
+        or PLACEHOLDER_NAME_RE.match(normalized_name)
+        or PLACEHOLDER_NAME_RE.match(normalized_stem)
+    ):
+        if not path.exists() or not path.is_file():
+            return True
+        try:
+            content = path.read_text(encoding="utf-8").strip().lower()
+        except UnicodeDecodeError:
+            return False
+        return content in {"", "keep"} or "placeholder" in content
+    return False

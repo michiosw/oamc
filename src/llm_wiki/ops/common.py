@@ -26,7 +26,9 @@ def today_stamp() -> str:
 
 
 def ensure_default_sources_section(content: str, source_refs: list[str]) -> str:
-    normalized = re.sub(r"\n#{1,6}\s+Sources\s*\n.*$", "", content.strip(), flags=re.DOTALL)
+    stripped = content.strip()
+    match = re.search(r"^#{1,6}\s+Sources\s*$", stripped, flags=re.MULTILINE)
+    normalized = stripped[: match.start()].rstrip() if match else stripped
     lines = ["## Sources"]
     for source in source_refs:
         lines.append(f"- {source}")

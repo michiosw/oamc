@@ -25,6 +25,7 @@ from llm_wiki.core.models import (
     RepoPaths,
     ResearchTemplate,
 )
+from llm_wiki.core.paths import is_placeholder_artifact
 from llm_wiki.integrations.obsidian import open_in_obsidian, reveal_in_finder
 from llm_wiki.llm.openai_client import OpenAIWikiClient
 from llm_wiki.ops.query import run_query
@@ -130,10 +131,10 @@ def render_home(repo_paths: RepoPaths) -> str:
     prioritized_pages.extend(page for page in pages if page != latest_source_page)
     recent = prioritized_pages[:8]
     stats = {
-        "Sources": len(list((repo_paths.wiki_root / "sources").glob("*.md"))),
-        "Entities": len(list((repo_paths.wiki_root / "entities").glob("*.md"))),
-        "Concepts": len(list((repo_paths.wiki_root / "concepts").glob("*.md"))),
-        "Syntheses": len(list((repo_paths.wiki_root / "syntheses").glob("*.md"))),
+        "Sources": len([page for page in (repo_paths.wiki_root / "sources").glob("*.md") if not is_placeholder_artifact(page)]),
+        "Entities": len([page for page in (repo_paths.wiki_root / "entities").glob("*.md") if not is_placeholder_artifact(page)]),
+        "Concepts": len([page for page in (repo_paths.wiki_root / "concepts").glob("*.md") if not is_placeholder_artifact(page)]),
+        "Syntheses": len([page for page in (repo_paths.wiki_root / "syntheses").glob("*.md") if not is_placeholder_artifact(page)]),
     }
 
     stat_html = "".join(
@@ -141,7 +142,7 @@ def render_home(repo_paths: RepoPaths) -> str:
         for label, value in stats.items()
     )
     recent_html = "".join(render_page_list_item(repo_paths, page) for page in recent) or "<li>No pages yet.</li>"
-    inbox_count = len(list(repo_paths.raw_inbox.glob("*")))
+    inbox_count = len([path for path in repo_paths.raw_inbox.glob("*") if path.is_file() and not is_placeholder_artifact(path)])
     latest_ingest_html = render_latest_ingest(repo_paths, report)
     health_html = render_health_surface(repo_paths, report, inbox_count)
     return f"""

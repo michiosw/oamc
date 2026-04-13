@@ -235,6 +235,50 @@ def test_ingest_with_empty_inbox_exits_cleanly(temp_workspace: Path, runner: Cli
     assert "Inbox is empty" in result.output
 
 
+def test_ingest_skips_placeholder_files_in_inbox(
+    temp_workspace: Path, runner: CliRunner, monkeypatch
+) -> None:
+    from llm_wiki import cli
+
+    monkeypatch.setattr(cli, "build_client", lambda config: FakeLLMClient())
+    (temp_workspace / "raw" / "inbox" / ".gitkeep").write_text("", encoding="utf-8")
+    (temp_workspace / "raw" / "inbox" / "keep").write_text("keep\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["ingest", "--base-dir", str(temp_workspace)])
+    assert result.exit_code == 0, result.output
+    assert "Inbox is empty" in result.output
+
+
+def test_doctor_ignores_placeholder_ingest_history(temp_workspace: Path) -> None:
+    (temp_workspace / "raw" / "sources" / "20260412-gitkeep-5").write_text("keep\n", encoding="utf-8")
+    (temp_workspace / "raw" / "sources" / "20260412-real-source.md").write_text(
+        "real\n", encoding="utf-8"
+    )
+    (temp_workspace / "wiki" / "log.md").write_text(
+        """# Wiki Log
+
+## [2026-04-12] ingest | 20260412-gitkeep-5
+
+Placeholder ingest.
+Touched pages:
+- sources/20260412-gitkeep-5
+
+## [2026-04-12] ingest | 20260412-real-source
+
+Real ingest.
+Touched pages:
+- sources/20260412-real-source
+""",
+        encoding="utf-8",
+    )
+
+    config, paths = load_config(temp_workspace)
+    report = build_doctor_report(config, paths, assume_dashboard_serving=True)
+    assert report.latest_processed_source == "raw/sources/20260412-real-source.md"
+    assert report.latest_ingest is not None
+    assert report.latest_ingest.title == "20260412-real-source"
+
+
 def test_start_command_launches_watch_and_dashboard(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
     from llm_wiki import cli
 

@@ -21,7 +21,7 @@ from llm_wiki.core.models import (
     HealthCheck,
     RepoPaths,
 )
-from llm_wiki.core.paths import repo_relative
+from llm_wiki.core.paths import is_placeholder_artifact, repo_relative
 from llm_wiki.ops.search import iter_wiki_pages
 
 LOG_HEADING_RE = re.compile(r"^## \[\d{4}-\d{2}-\d{2}\] [a-z-]+ \| .+$")
@@ -247,7 +247,11 @@ def build_doctor_report(
     elif any(check.status == "warn" for check in checks):
         overall_status = "warn"
 
-    inbox_files = [path for path in repo_paths.raw_inbox.glob("*") if path.is_file()]
+    inbox_files = [
+        path
+        for path in repo_paths.raw_inbox.glob("*")
+        if path.is_file() and not is_placeholder_artifact(path)
+    ]
     if inbox_files:
         recommended_next_step = "Inbox pending. Let the menubar watcher process it, or run llm-wiki process."
     else:
@@ -408,19 +412,37 @@ def parse_latest_log_entry(repo_paths: RepoPaths, operation: str | None = None) 
                 continue
             if stripped:
                 summary_lines.append(stripped)
-        return ActivityEntry(
+        activity = ActivityEntry(
             heading=heading,
             operation=entry_operation,
             title=title,
             summary="\n".join(summary_lines).strip(),
             touched_pages=touched_pages,
         )
+        if _activity_entry_is_placeholder(activity):
+            continue
+        return activity
     return None
+
+
+def _activity_entry_is_placeholder(entry: ActivityEntry) -> bool:
+    title_path = Path(entry.title)
+    if is_placeholder_artifact(title_path):
+        return True
+    for touched in entry.touched_pages:
+        if is_placeholder_artifact(Path(touched)):
+            return True
+    summary = entry.summary.lower()
+    return "gitkeep" in summary and "placeholder" in summary
 
 
 def latest_source_path(repo_paths: RepoPaths) -> str | None:
     sources = sorted(
-        (path for path in repo_paths.raw_sources.glob("*") if path.is_file()),
+        (
+            path
+            for path in repo_paths.raw_sources.glob("*")
+            if path.is_file() and not is_placeholder_artifact(path)
+        ),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )

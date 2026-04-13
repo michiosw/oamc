@@ -10,6 +10,7 @@ from llm_wiki.core.markdown import (
     summary_from_content,
 )
 from llm_wiki.core.models import RepoPaths, SearchCandidate
+from llm_wiki.core.paths import is_placeholder_artifact
 
 WIKI_DIRS = ("sources", "entities", "concepts", "syntheses")
 
@@ -17,7 +18,13 @@ WIKI_DIRS = ("sources", "entities", "concepts", "syntheses")
 def iter_wiki_pages(repo_paths: RepoPaths) -> list[Path]:
     pages: list[Path] = []
     for directory in WIKI_DIRS:
-        pages.extend(sorted((repo_paths.wiki_root / directory).glob("*.md")))
+        pages.extend(
+            sorted(
+                page
+                for page in (repo_paths.wiki_root / directory).glob("*.md")
+                if not is_placeholder_artifact(page)
+            )
+        )
     return pages
 
 

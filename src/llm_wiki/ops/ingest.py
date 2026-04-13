@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from llm_wiki.core.markdown import read_text, slugify
 from llm_wiki.core.models import AppConfig, IngestRequest, IngestResult, RepoPaths
-from llm_wiki.core.paths import repo_relative
+from llm_wiki.core.paths import is_placeholder_artifact, repo_relative
 from llm_wiki.core.telemetry import get_logger, log_event
 from llm_wiki.llm.base import LLMClient
 from llm_wiki.ops.common import append_log_entry, write_wiki_draft
@@ -75,6 +75,15 @@ def ingest_sources(
     for original_path in source_paths:
         touched: list[str] = []
         source_path = _resolve_source_path(repo_paths, original_path)
+        if is_placeholder_artifact(source_path):
+            log_event(
+                LOGGER,
+                "ingest_source_skipped",
+                operation_id=operation_id,
+                source_path=repo_relative(source_path, repo_paths.base_dir),
+                reason="placeholder_artifact",
+            )
+            continue
         log_event(
             LOGGER,
             "ingest_source_started",
