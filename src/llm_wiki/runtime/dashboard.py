@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import re
+import threading
 from datetime import datetime
 from html import escape
 from pathlib import Path
 from typing import cast
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from markdown_it import MarkdownIt
 
 from llm_wiki.core.config import load_config
@@ -25,9 +26,10 @@ from llm_wiki.core.models import (
     RepoPaths,
     ResearchTemplate,
 )
-from llm_wiki.core.paths import is_placeholder_artifact
+from llm_wiki.core.paths import is_placeholder_artifact, repo_relative
 from llm_wiki.integrations.obsidian import open_in_obsidian, reveal_in_finder
 from llm_wiki.llm.openai_client import OpenAIWikiClient
+from llm_wiki.ops.capture import capture_text_to_inbox
 from llm_wiki.ops.query import run_query
 from llm_wiki.ops.search import iter_wiki_pages, search_pages
 
@@ -37,7 +39,12 @@ WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 MD = MarkdownIt("commonmark", {"html": False, "linkify": True}).enable("table")
 
 
-def create_dashboard_app(repo_paths: RepoPaths) -> FastAPI:
+def create_dashboard_app(
+    repo_paths: RepoPaths,
+    *,
+    process_lock: threading.Lock | None = None,
+    lint: bool = True,
+) -> FastAPI:
     app = FastAPI(title="oamc", docs_url=None, redoc_url=None)
 
     @app.get("/", response_class=HTMLResponse)
@@ -101,6 +108,86 @@ def create_dashboard_app(repo_paths: RepoPaths) -> FastAPI:
             open_in_obsidian(repo_paths.base_dir, absolute)
         return RedirectResponse(request.headers.get("referer") or "/", status_code=303)
 
+    @app.post("/capture")
+    async def capture_note(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Capture request must be valid JSON.") from exc
+
+        text = str(payload.get("text") or "")
+        title = str(payload.get("title") or "")
+        source_url = str(payload.get("source_url") or "")
+        if not text.strip():
+            return JSONResponse(
+                {"ok": False, "message": "Nothing to capture. Paste some text first."},
+                status_code=400,
+            )
+
+        from llm_wiki.runtime.studio import run_process_once
+
+        config, _ = load_config(repo_paths.base_dir)
+        captured_path: Path | None = None
+        source_page_path: str | None = None
+        try:
+            if process_lock is not None:
+                with process_lock:
+                    captured_path = capture_text_to_inbox(
+                        repo_paths,
+                        text,
+                        title=title,
+                        source_url=source_url,
+                        captured_from="dashboard",
+                    )
+                    queued_paths = sorted(repo_paths.raw_inbox.glob("*"))
+                    capture_index = queued_paths.index(captured_path)
+                    ingest_result, _ = run_process_once(
+                        config,
+                        repo_paths,
+                        OpenAIWikiClient(config),
+                        lint=lint,
+                    )
+            else:
+                captured_path = capture_text_to_inbox(
+                    repo_paths,
+                    text,
+                    title=title,
+                    source_url=source_url,
+                    captured_from="dashboard",
+                )
+                queued_paths = sorted(repo_paths.raw_inbox.glob("*"))
+                capture_index = queued_paths.index(captured_path)
+                ingest_result, _ = run_process_once(
+                    config,
+                    repo_paths,
+                    OpenAIWikiClient(config),
+                    lint=lint,
+                )
+            if capture_index < len(ingest_result.source_pages):
+                source_page_path = ingest_result.source_pages[capture_index]
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+        except RuntimeError as exc:
+            queued_relative = repo_relative(captured_path, repo_paths.base_dir) if captured_path else "raw/inbox"
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "message": f"Captured note to {queued_relative}, but processing could not finish yet: {exc}",
+                    "queued_path": queued_relative,
+                },
+                status_code=500,
+            )
+
+        queued_relative = repo_relative(captured_path, repo_paths.base_dir) if captured_path else "raw/inbox"
+        response = {
+            "ok": True,
+            "message": f"Captured note from the dashboard and processed {queued_relative}.",
+            "queued_path": queued_relative,
+        }
+        if source_page_path:
+            response["redirect"] = f"/page/{source_page_path}"
+        return JSONResponse(response)
+
     return app
 
 
@@ -151,11 +238,11 @@ def render_home(repo_paths: RepoPaths) -> str:
         <div class="hero">
           <p class="eyebrow">Local wiki workspace</p>
           <h1>Research against the wiki, not against scattered notes.</h1>
-          <p class="lede">Clip into <code>raw/inbox/</code>, let the watcher process it, then ask one bounded research question at a time.</p>
+          <p class="lede">Clip sources or paste copied notes into the inbox pipeline, let oamc process them, then ask one bounded research question at a time.</p>
         </div>
         <div class="hero-note">
           <p class="eyebrow">Official workflow</p>
-          <p class="meta-line">The supported ingest path is <code>raw/inbox/</code>. Anything left in <code>Clippings/</code> is outside the pipeline.</p>
+          <p class="meta-line">Everything still flows through <code>raw/inbox/</code>. Clipboard capture writes a real markdown source there before ingest.</p>
           <p class="meta-line">On macOS, the canonical runtime is <code>uv run llm-wiki install-menubar</code>.</p>
         </div>
       </div>
@@ -167,6 +254,7 @@ def render_home(repo_paths: RepoPaths) -> str:
         <div class="stats">{stat_html}</div>
       </div>
     </section>
+    {render_capture_form(compact=True)}
     {latest_ingest_html}
     <section class="split">
       <div class="section-panel">
@@ -211,6 +299,31 @@ def render_ask_form(
         </div>
       </form>
       <p class="helper">Every serious question writes a synthesis page, updates the index, and is meant to be continued in Obsidian.</p>
+    </section>
+    """
+
+
+def render_capture_form(*, compact: bool = False) -> str:
+    panel_class = "capture-panel capture-panel-compact" if compact else "capture-panel"
+    return f"""
+    <section class="{panel_class}">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Capture mode</p>
+          <h2>Paste a copied note into the wiki pipeline.</h2>
+        </div>
+        <p class="template-note">Best for prompts, copied chat snippets, command recipes, or partial notes that are not worth a full web clip.</p>
+      </div>
+      <form class="capture-form" data-capture-form>
+        <textarea name="text" placeholder="Paste the note you copied here..." required></textarea>
+        <div class="capture-controls">
+          <input type="text" name="title" placeholder="Optional title">
+          <input type="url" name="source_url" placeholder="Optional source URL">
+          <button type="submit">Capture And Process</button>
+        </div>
+      </form>
+      <p class="helper">oamc writes a markdown file into <code>raw/inbox/</code>, then processes it with the same ingest pipeline as normal clips.</p>
+      <p class="capture-status" data-capture-status aria-live="polite"></p>
     </section>
     """
 
@@ -709,6 +822,7 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
     }}
     .ask-panel,
     .answer-panel,
+    .capture-panel,
     .stat {{
       background: var(--panel);
       border: 1px solid var(--border);
@@ -719,6 +833,10 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
     }}
     .ask-panel-compact {{
       padding: 24px 24px 22px;
+    }}
+    .capture-panel-compact {{
+      padding: 24px;
+      animation: rise-in 580ms ease both;
     }}
     .panel-heading {{
       display: flex;
@@ -742,9 +860,18 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       min-width: 0;
       margin-top: 18px;
     }}
+    .capture-form {{
+      display: grid;
+      gap: 14px;
+      min-width: 0;
+      margin-top: 18px;
+    }}
     .ask-form input[type="search"],
     .ask-form input[type="text"],
-    .ask-form select {{
+    .ask-form select,
+    .capture-form input[type="text"],
+    .capture-form input[type="url"],
+    .capture-form textarea {{
       width: 100%;
       border: 1px solid var(--border);
       background: rgba(255,255,255,0.74);
@@ -754,9 +881,20 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       font: inherit;
       box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
     }}
+    .capture-form textarea {{
+      min-height: 180px;
+      resize: vertical;
+      line-height: 1.55;
+    }}
     .ask-controls {{
       display: grid;
       grid-template-columns: minmax(0, 1.2fr) 180px auto;
+      gap: 12px;
+      align-items: center;
+    }}
+    .capture-controls {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
       gap: 12px;
       align-items: center;
     }}
@@ -764,6 +902,17 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       color: var(--muted);
       margin: 10px 0 0;
       max-width: 56ch;
+    }}
+    .capture-status {{
+      min-height: 1.5em;
+      margin: 8px 0 0;
+      color: var(--muted);
+    }}
+    .capture-status[data-state="error"] {{
+      color: #8a3e2d;
+    }}
+    .capture-status[data-state="working"] {{
+      color: var(--accent);
     }}
     .stat-label {{
       color: var(--muted);
@@ -985,6 +1134,7 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       pointer-events: none;
     }}
     .ask-panel,
+    .capture-panel,
     .stats-panel,
     .answer-panel,
     .status-card,
@@ -1016,6 +1166,7 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
       header, .split, .hero-grid, .editorial-band {{ grid-template-columns: 1fr; display: grid; }}
       header form {{ min-width: 0; }}
       .ask-controls {{ grid-template-columns: 1fr; }}
+      .capture-controls {{ grid-template-columns: 1fr; }}
       .panel-heading {{ grid-template-columns: 1fr; display: grid; align-items: start; }}
       .sidebar {{ position: static; }}
       .stats {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
@@ -1034,6 +1185,7 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
         padding: 24px 22px 28px;
       }}
       .ask-panel,
+      .capture-panel,
       .answer-panel,
       .stat,
       .status-card,
@@ -1057,5 +1209,62 @@ def render_layout(title: str, body: str, *, q: str = "") -> str:
     </header>
     <main>{body}</main>
   </div>
+  <script>
+    document.addEventListener("submit", async (event) => {{
+      const form = event.target;
+      if (!(form instanceof HTMLFormElement) || !form.hasAttribute("data-capture-form")) {{
+        return;
+      }}
+      event.preventDefault();
+      const status = form.parentElement?.querySelector("[data-capture-status]");
+      const button = form.querySelector('button[type="submit"]');
+      const textField = form.querySelector('textarea[name="text"]');
+      const titleField = form.querySelector('input[name="title"]');
+      const sourceUrlField = form.querySelector('input[name="source_url"]');
+      if (!(textField instanceof HTMLTextAreaElement)) {{
+        return;
+      }}
+      if (status instanceof HTMLElement) {{
+        status.dataset.state = "working";
+        status.textContent = "Capturing note and processing the inbox...";
+      }}
+      if (button instanceof HTMLButtonElement) {{
+        button.disabled = true;
+      }}
+      try {{
+        const response = await fetch("/capture", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{
+            text: textField.value,
+            title: titleField instanceof HTMLInputElement ? titleField.value : "",
+            source_url: sourceUrlField instanceof HTMLInputElement ? sourceUrlField.value : "",
+          }}),
+        }});
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {{
+          throw new Error(payload.message || "Could not capture the note.");
+        }}
+        if (payload.redirect) {{
+          window.location.assign(payload.redirect);
+          return;
+        }}
+        form.reset();
+        if (status instanceof HTMLElement) {{
+          status.dataset.state = "";
+          status.textContent = payload.message || "Captured note.";
+        }}
+      }} catch (error) {{
+        if (status instanceof HTMLElement) {{
+          status.dataset.state = "error";
+          status.textContent = error instanceof Error ? error.message : "Could not capture the note.";
+        }}
+      }} finally {{
+        if (button instanceof HTMLButtonElement) {{
+          button.disabled = false;
+        }}
+      }}
+    }});
+  </script>
 </body>
 </html>"""

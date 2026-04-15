@@ -25,6 +25,7 @@ from llm_wiki.integrations.menubar import install_launch_agent, run_menubar, uni
 from llm_wiki.integrations.obsidian import open_in_obsidian
 from llm_wiki.llm.base import LLMClient
 from llm_wiki.llm.openai_client import OpenAIWikiClient
+from llm_wiki.ops.capture import capture_clipboard_to_inbox, capture_text_to_inbox
 from llm_wiki.ops.ingest import ingest_sources
 from llm_wiki.ops.lint import run_lint
 from llm_wiki.ops.query import run_query
@@ -310,6 +311,51 @@ def process(
 
 
 @app.command()
+def capture(
+    text: str = typer.Option("", "--text", help="Capture this text instead of reading the clipboard."),
+    title: str = typer.Option("", "--title"),
+    source_url: str = typer.Option("", "--source-url"),
+    process: bool = typer.Option(True, "--process/--no-process"),
+    lint: bool = typer.Option(True, "--lint/--no-lint"),
+    base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
+) -> None:
+    config, repo_paths = load_config_or_exit(base_dir)
+    log_event(LOGGER, "command_started", command="capture", base_dir=repo_paths.base_dir, process=process, lint=lint)
+    try:
+        if text.strip():
+            captured_path = capture_text_to_inbox(
+                repo_paths,
+                text,
+                title=title,
+                source_url=source_url,
+                captured_from="cli",
+            )
+        else:
+            captured_path = capture_clipboard_to_inbox(
+                repo_paths,
+                title=title,
+                source_url=source_url,
+                captured_from="clipboard",
+            )
+    except (RuntimeError, ValueError) as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+
+    captured_relative = repo_relative(captured_path, repo_paths.base_dir)
+    typer.echo(f"Captured note to {captured_relative}")
+    if not process:
+        typer.echo("Queued in raw/inbox. Process it later with `llm-wiki process` or let the watcher pick it up.")
+        raise typer.Exit()
+
+    client = build_client_or_exit(config)
+    try:
+        run_process_once(config, repo_paths, client, lint=lint, emit=_emit)
+    except RuntimeError as exc:
+        typer.echo(f"Captured note is still queued in {captured_relative}.")
+        _exit_on_runtime_error(exc)
+
+
+@app.command()
 def status(
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
@@ -346,16 +392,22 @@ def doctor(
     _print_doctor_report(report)
 
 
-@app.command()
-def serve(
-    host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(8421, "--port", min=1, max=65535),
-    open_browser: bool = typer.Option(True, "--open/--no-open"),
-    base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
+def _run_dashboard_server(
+    repo_paths: RepoPaths,
+    *,
+    host: str,
+    port: int,
+    open_browser: bool,
+    process_lock: threading.Lock | None = None,
+    lint: bool = True,
 ) -> None:
-    _, repo_paths = load_config_or_exit(base_dir)
-    log_event(LOGGER, "command_started", command="serve", base_dir=repo_paths.base_dir, host=host, port=port)
-    server = DashboardServer(repo_paths, host=host, port=port)
+    server = DashboardServer(
+        repo_paths,
+        host=host,
+        port=port,
+        process_lock=process_lock,
+        lint=lint,
+    )
     url = server.url
     typer.echo(f"Serving wiki dashboard at {url}")
     if open_browser:
@@ -366,6 +418,24 @@ def serve(
             threading.Event().wait(3600)
     except KeyboardInterrupt:
         server.stop()
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8421, "--port", min=1, max=65535),
+    open_browser: bool = typer.Option(True, "--open/--no-open"),
+    base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
+) -> None:
+    _, repo_paths = load_config_or_exit(base_dir)
+    log_event(LOGGER, "command_started", command="serve", base_dir=repo_paths.base_dir, host=host, port=port)
+    _run_dashboard_server(
+        repo_paths,
+        host=host,
+        port=port,
+        open_browser=open_browser,
+        process_lock=threading.Lock(),
+    )
 
 
 @app.command()
@@ -382,6 +452,7 @@ def start(
     typer.echo("Starting oamc studio")
     typer.echo(f"- Dashboard: http://{host}:{port}")
     typer.echo(f"- Inbox watch: {repo_relative(repo_paths.raw_inbox, repo_paths.base_dir)}")
+    process_lock = threading.Lock()
     watch_thread = threading.Thread(
         target=watch_loop,
         kwargs={
@@ -391,16 +462,19 @@ def start(
             "lint": lint,
             "interval": interval,
             "emit": _emit,
+            "process_lock": process_lock,
         },
         daemon=True,
         name="llm-wiki-watch",
     )
     watch_thread.start()
-    serve(
+    _run_dashboard_server(
+        repo_paths,
         host=host,
         port=port,
         open_browser=open_browser,
-        base_dir=repo_paths.base_dir,
+        process_lock=process_lock,
+        lint=lint,
     )
 
 
