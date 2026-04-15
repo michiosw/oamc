@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/).
 
+## [0.5.0](https://github.com/michiosw/oamc/compare/v0.4.1...v0.5.0) (2026-04-15)
+
+
+### Features
+
+* add clipboard capture workflow ([3a9c0ea](https://github.com/michiosw/oamc/commit/3a9c0eae0477018dfeffdc1181f3e07ad5c26609))
+
+
+### Bug Fixes
+
+* avoid mypy unreachable in clipboard helper ([bdff368](https://github.com/michiosw/oamc/commit/bdff368c23ba8b056f94928952c7aaa9b0165efd))
+
 ## [Unreleased]
 
 ## [0.4.1] - 2026-04-13
