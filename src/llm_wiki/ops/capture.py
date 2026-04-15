@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import platform
 import subprocess
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -57,7 +57,7 @@ def capture_clipboard_to_inbox(
 
 
 def read_clipboard_text() -> str:
-    if sys.platform != "darwin":
+    if platform.system() != "Darwin":
         raise RuntimeError("Clipboard capture is currently supported on macOS only.")
 
     result = subprocess.run(
