@@ -13,6 +13,7 @@ from llm_wiki import __version__
 from llm_wiki.core.config import load_config
 from llm_wiki.core.health import build_doctor_report
 from llm_wiki.llm.openai_client import OpenAIWikiClient
+from llm_wiki.ops.capture import capture_clipboard_to_inbox
 from llm_wiki.runtime.studio import (
     DashboardServer,
     inbox_count,
@@ -246,13 +247,18 @@ def run_menubar(
     import rumps
 
     config, repo_paths = load_config(base_dir)
-    dashboard = DashboardServer(repo_paths, host=host, port=port)
+    process_lock = threading.Lock()
+    stop_event = threading.Event()
+    dashboard = DashboardServer(
+        repo_paths,
+        host=host,
+        port=port,
+        process_lock=process_lock,
+        lint=lint,
+    )
     dashboard.start()
     if open_browser:
         subprocess.run(["open", dashboard.url], check=False)
-
-    process_lock = threading.Lock()
-    stop_event = threading.Event()
 
     def notify(message: str) -> None:
         if message.startswith("Processed inbox"):
@@ -288,6 +294,7 @@ def run_menubar(
                 "Open Vault in Obsidian",
                 "Show Workspace Folder",
                 None,
+                "Capture Clipboard",
                 "Process Inbox",
                 "Restart App",
                 "Show Installed App",
@@ -322,6 +329,29 @@ def run_menubar(
         @rumps.clicked("Show Workspace Folder")
         def open_repo(self, _sender: object) -> None:
             subprocess.run(["open", repo_paths.base_dir.as_posix()], check=False)
+
+        @rumps.clicked("Capture Clipboard")
+        def capture_clipboard(self, _sender: object) -> None:
+            def _task() -> None:
+                try:
+                    with process_lock:
+                        capture_clipboard_to_inbox(
+                            repo_paths,
+                            captured_from="menubar",
+                        )
+                        run_process_once(
+                            config,
+                            repo_paths,
+                            OpenAIWikiClient(config),
+                            lint=lint,
+                            emit=notify,
+                        )
+                except Exception as exc:
+                    rumps.notification(APP_NAME, "Clipboard capture issue", str(exc))
+                finally:
+                    self.refresh(None)
+
+            threading.Thread(target=_task, daemon=True, name="llm-wiki-capture-clipboard").start()
 
         @rumps.clicked("Process Inbox")
         def process_now(self, _sender: object) -> None:

@@ -303,7 +303,22 @@ def test_start_command_launches_watch_and_dashboard(temp_workspace: Path, runner
         }
 
     monkeypatch.setattr(cli.threading, "Thread", FakeThread)
-    monkeypatch.setattr(cli, "serve", fake_serve)
+    monkeypatch.setattr(
+        cli,
+        "_run_dashboard_server",
+        lambda repo_paths, *, host, port, open_browser, process_lock, lint=True: started.update(
+            {
+                "serve": {
+                    "host": host,
+                    "port": port,
+                    "open_browser": open_browser,
+                    "base_dir": repo_paths.base_dir,
+                    "process_lock": process_lock,
+                    "lint": lint,
+                }
+            }
+        ),
+    )
 
     result = runner.invoke(app, ["start", "--no-open", "--base-dir", str(temp_workspace)])
     assert result.exit_code == 0, result.output
@@ -315,6 +330,8 @@ def test_start_command_launches_watch_and_dashboard(temp_workspace: Path, runner
         "port": 8421,
         "open_browser": False,
         "base_dir": temp_workspace,
+        "process_lock": started["kwargs"]["process_lock"],
+        "lint": True,
     }
 
 
@@ -421,6 +438,55 @@ def test_process_command_runs_ingest_and_lint(temp_workspace: Path, runner: CliR
 
     result = runner.invoke(app, ["process", "--base-dir", str(temp_workspace)])
     assert result.exit_code == 0, result.output
+    assert "Processed inbox" in result.output
+    assert "Lint complete" in result.output
+
+
+def test_capture_command_queues_note_without_processing(temp_workspace: Path, runner: CliRunner) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "capture",
+            "--text",
+            "SnapAI prompt note",
+            "--title",
+            "SnapAI wallet icon note",
+            "--no-process",
+            "--base-dir",
+            str(temp_workspace),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Captured note to raw/inbox/" in result.output
+    inbox_files = list((temp_workspace / "raw" / "inbox").glob("*.md"))
+    assert len(inbox_files) == 1
+    content = inbox_files[0].read_text(encoding="utf-8")
+    assert "captured_from: cli" in content
+    assert "title: SnapAI wallet icon note" in content
+    assert "SnapAI prompt note" in content
+
+
+def test_capture_command_processes_clipboard_note(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
+    from llm_wiki import cli
+
+    monkeypatch.setattr(cli, "build_client", lambda config: FakeLLMClient())
+    monkeypatch.setattr(
+        cli,
+        "capture_clipboard_to_inbox",
+        lambda repo_paths, title="", source_url="", captured_from="clipboard": (
+            repo_paths.raw_inbox / "clipboard-snapai-note.md"
+        ),
+    )
+    (temp_workspace / "raw" / "inbox" / "clipboard-snapai-note.md").write_text(
+        "# Clipboard Note\n\nSnapAI wallet icon prompt.\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["capture", "--base-dir", str(temp_workspace)])
+
+    assert result.exit_code == 0, result.output
+    assert "Captured note to raw/inbox/clipboard-snapai-note.md" in result.output
     assert "Processed inbox" in result.output
     assert "Lint complete" in result.output
 

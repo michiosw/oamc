@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import threading
+
 from fastapi.testclient import TestClient
 
 from llm_wiki.core.config import load_config
-from llm_wiki.core.models import QueryResult
+from llm_wiki.core.models import IngestResult, QueryResult
 from llm_wiki.ops.common import default_page
 from llm_wiki.runtime.dashboard import create_dashboard_app
 
@@ -24,6 +26,7 @@ def test_dashboard_home_and_search(temp_workspace) -> None:
     assert response.status_code == 200
     assert "oamc" in response.text
     assert "Research mode" in response.text
+    assert "Paste a copied note into the wiki pipeline." in response.text
 
     response = client.get("/search", params={"q": "frontend"})
     assert response.status_code == 200
@@ -126,3 +129,53 @@ def test_dashboard_open_route_uses_obsidian_and_finder_actions(temp_workspace, m
     response = client.get("/open", params={"kind": "wiki", "path": "concepts/frontend-design", "target": "finder"}, follow_redirects=False)
     assert response.status_code == 303
     assert revealed == [page.as_posix()]
+
+
+def test_dashboard_capture_route_writes_note_and_returns_redirect(temp_workspace, monkeypatch) -> None:
+    from llm_wiki.runtime import dashboard, studio
+
+    class FakeOpenAIClient:
+        def __init__(self, config) -> None:
+            self.config = config
+
+    processed: dict[str, object] = {}
+
+    def fake_run_process_once(config, repo_paths, client, *, lint, emit=None):
+        inbox_files = sorted(path.name for path in repo_paths.raw_inbox.glob("*.md"))
+        processed["inbox_files"] = inbox_files
+        processed["lint"] = lint
+        return (
+            IngestResult(
+                processed_sources=["raw/sources/20260415-clipboard-note.md"],
+                source_pages=["sources/20260415-clipboard-note.md"],
+            ),
+            None,
+        )
+
+    monkeypatch.setattr(dashboard, "OpenAIWikiClient", FakeOpenAIClient)
+    monkeypatch.setattr(studio, "run_process_once", fake_run_process_once)
+
+    _, paths = load_config(temp_workspace)
+    client = TestClient(create_dashboard_app(paths, process_lock=threading.Lock()))
+
+    response = client.post(
+        "/capture",
+        json={
+            "text": "snapai icon --model gpt-1.5",
+            "title": "SnapAI wallet icon command",
+            "source_url": "https://example.com/note",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["redirect"] == "/page/sources/20260415-clipboard-note.md"
+    inbox_files = list((temp_workspace / "raw" / "inbox").glob("*.md"))
+    assert len(inbox_files) == 1
+    content = inbox_files[0].read_text(encoding="utf-8")
+    assert "captured_from: dashboard" in content
+    assert "source_url: https://example.com/note" in content
+    assert "snapai icon --model gpt-1.5" in content
+    assert processed["inbox_files"] == [inbox_files[0].name]
+    assert processed["lint"] is True

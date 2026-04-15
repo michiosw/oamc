@@ -64,13 +64,15 @@ That installs `oamc.app`, keeps the watcher and dashboard running, and removes t
 ## Daily Flow
 
 1. Clip a source into `raw/inbox/`
-2. Let the watcher process it, or run `uv run llm-wiki process`
-3. Review the generated pages in Obsidian
-4. Ask a research question with `uv run llm-wiki query "..." --template synthesis`
+2. Or capture a copied note with `uv run llm-wiki capture`
+3. Let the watcher process it, or run `uv run llm-wiki process`
+4. Review the generated pages in Obsidian
+5. Ask a research question with `uv run llm-wiki query "..." --template synthesis`
 
 Useful commands:
 
 ```bash
+uv run llm-wiki capture
 uv run llm-wiki process
 uv run llm-wiki query "What does the wiki currently know about X?"
 uv run llm-wiki status
@@ -109,6 +111,7 @@ This repo uses `release-please` for versioning and GitHub Releases.
 ## Notes
 
 - `raw/inbox/` is the only supported clipping destination
+- clipboard capture also writes markdown into `raw/inbox/` before ingest
 - `raw/` is immutable input; successful ingest moves files from `raw/inbox/` to `raw/sources/`
 - `wiki/` is the maintained knowledge layer
 - `CONTRIBUTING.md` and `SECURITY.md` are the source of truth for contributor workflow and disclosure

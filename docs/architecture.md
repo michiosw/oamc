@@ -9,6 +9,8 @@
 3. the application writes structured pages into `wiki/`
 4. queries operate on the wiki, not directly on raw documents
 
+Clipboard capture follows the same path: copied text is first written as a markdown file into `raw/inbox/`, then processed through the normal ingest workflow.
+
 ## Package layout
 
 - `src/llm_wiki/core/` contains config, models, paths, health checks, markdown helpers, and telemetry

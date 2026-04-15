@@ -121,10 +121,20 @@ def watch_loop(
 
 
 class DashboardServer:
-    def __init__(self, repo_paths: RepoPaths, *, host: str, port: int) -> None:
+    def __init__(
+        self,
+        repo_paths: RepoPaths,
+        *,
+        host: str,
+        port: int,
+        process_lock: threading.Lock | None = None,
+        lint: bool = True,
+    ) -> None:
         self.repo_paths = repo_paths
         self.host = host
         self.port = port
+        self.process_lock = process_lock
+        self.lint = lint
         self.url = f"http://{host}:{port}"
         self._thread: threading.Thread | None = None
         self._server: uvicorn.Server | None = None
@@ -133,7 +143,11 @@ class DashboardServer:
         if self._thread is not None:
             return
         config = uvicorn.Config(
-            create_dashboard_app(self.repo_paths),
+            create_dashboard_app(
+                self.repo_paths,
+                process_lock=self.process_lock,
+                lint=self.lint,
+            ),
             host=self.host,
             port=self.port,
             log_level="warning",
