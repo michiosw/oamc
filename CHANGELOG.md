@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/).
 
+## [0.5.1](https://github.com/michiosw/oamc/compare/v0.5.0...v0.5.1) (2026-04-17)
+
+
+### Bug Fixes
+
+* restore menubar background error reporting ([10b938d](https://github.com/michiosw/oamc/commit/10b938d01a99252dbe31262a5c5a5800581ec579))
+
 ## [0.5.0](https://github.com/michiosw/oamc/compare/v0.4.1...v0.5.0) (2026-04-15)
 
 
