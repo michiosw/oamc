@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,6 +14,7 @@ from llm_wiki import __version__
 from llm_wiki.core.config import load_config
 from llm_wiki.core.health import build_doctor_report
 from llm_wiki.core.models import AppConfig, RepoPaths
+from llm_wiki.core.telemetry import get_logger, log_event
 from llm_wiki.llm.openai_client import OpenAIWikiClient
 from llm_wiki.ops.capture import capture_clipboard_to_inbox
 from llm_wiki.runtime.studio import (
@@ -28,6 +30,8 @@ LAUNCH_AGENT_LABEL = "dev.oamc.studio"
 APP_NAME = "oamc"
 APP_BUNDLE_NAME = f"{APP_NAME}.app"
 APP_BUNDLE_ID = "dev.oamc.studio"
+LOGGER = get_logger(__name__)
+Notification = Callable[[str, str, str], None]
 
 
 def app_bundle_path(home: Path | None = None) -> Path:
@@ -335,32 +339,38 @@ def run_menubar(
         @rumps.clicked("Capture Clipboard")
         def capture_clipboard(self, _sender: object) -> None:
             def _task() -> None:
-                try:
-                    _capture_clipboard_and_process(
+                _run_background_action(
+                    action="capture_clipboard",
+                    failure_title="Clipboard capture issue",
+                    task=lambda: _capture_clipboard_and_process(
                         config=config,
                         repo_paths=repo_paths,
                         process_lock=process_lock,
                         lint=lint,
                         notify=notify,
-                    )
-                finally:
-                    self.refresh(None)
+                    ),
+                    notify_user=rumps.notification,
+                    refresh=lambda: self.refresh(None),
+                )
 
             threading.Thread(target=_task, daemon=True, name="llm-wiki-capture-clipboard").start()
 
         @rumps.clicked("Process Inbox")
         def process_now(self, _sender: object) -> None:
             def _task() -> None:
-                try:
-                    _process_inbox(
+                _run_background_action(
+                    action="process_inbox",
+                    failure_title="Processing issue",
+                    task=lambda: _process_inbox(
                         config=config,
                         repo_paths=repo_paths,
                         process_lock=process_lock,
                         lint=lint,
                         notify=notify,
-                    )
-                finally:
-                    self.refresh(None)
+                    ),
+                    notify_user=rumps.notification,
+                    refresh=lambda: self.refresh(None),
+                )
 
             threading.Thread(target=_task, daemon=True, name="llm-wiki-process-now").start()
 
@@ -401,6 +411,24 @@ def _short_activity_label(heading: str) -> str:
         shortened = title if len(title) <= 42 else f"{title[:39].rstrip()}..."
         return f"{operation} · {shortened}"
     return heading
+
+
+def _run_background_action(
+    *,
+    action: str,
+    failure_title: str,
+    task: Callable[[], None],
+    notify_user: Notification,
+    refresh: Callable[[], None],
+) -> None:
+    try:
+        task()
+    except Exception as exc:
+        notify_user(APP_NAME, failure_title, str(exc))
+        log_event(LOGGER, "menubar_background_action_failed", action=action, error=str(exc))
+        raise
+    finally:
+        refresh()
 
 
 def _capture_clipboard_and_process(
