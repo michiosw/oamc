@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import frontmatter
+import yaml
 
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -18,7 +19,7 @@ def slugify(value: str) -> str:
 
 
 def load_markdown(path: Path) -> tuple[dict[str, Any], str]:
-    post = frontmatter.load(path)
+    post = parse_markdown(path.read_text(encoding="utf-8"))
     return dict(post.metadata), post.content.strip()
 
 
@@ -89,7 +90,7 @@ def read_text(path: Path) -> str:
 def parse_markdown(content: str) -> frontmatter.Post:
     try:
         return frontmatter.loads(content)
-    except Exception:
+    except yaml.YAMLError:
         stripped = strip_frontmatter_block(content)
         return frontmatter.Post(stripped.strip())
 

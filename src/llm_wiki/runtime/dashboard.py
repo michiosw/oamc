@@ -5,7 +5,6 @@ import threading
 from datetime import datetime
 from html import escape
 from pathlib import Path
-from typing import cast
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -24,7 +23,7 @@ from llm_wiki.core.models import (
     DoctorReport,
     QueryResult,
     RepoPaths,
-    ResearchTemplate,
+    normalize_research_template,
 )
 from llm_wiki.core.paths import is_placeholder_artifact, repo_relative
 from llm_wiki.integrations.obsidian import open_in_obsidian, reveal_in_finder
@@ -37,6 +36,7 @@ BODY_FONT = '"Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif'
 DISPLAY_FONT = '"Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif'
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 MD = MarkdownIt("commonmark", {"html": False, "linkify": True}).enable("table")
+MetadataValue = str | int | float | bool | None | list[object]
 
 
 def create_dashboard_app(
@@ -72,7 +72,7 @@ def create_dashboard_app(
     @app.get("/ask", response_class=HTMLResponse)
     def ask(q: str = Query(""), scope: str = Query(""), template: str = Query("synthesis")) -> str:
         question = q.strip()
-        template_name = cast(ResearchTemplate, template if template in RESEARCH_TEMPLATES else "synthesis")
+        template_name = normalize_research_template(template)
         if not question:
             return render_layout("Ask", render_ask_form(template=template_name))
 
@@ -115,9 +115,14 @@ def create_dashboard_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="Capture request must be valid JSON.") from exc
 
-        text = str(payload.get("text") or "")
-        title = str(payload.get("title") or "")
-        source_url = str(payload.get("source_url") or "")
+        capture_fields = parse_capture_payload(payload)
+        if capture_fields is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Capture request must include string text, title, and source_url fields.",
+            )
+
+        text, title, source_url = capture_fields
         if not text.strip():
             return JSONResponse(
                 {"ok": False, "message": "Nothing to capture. Paste some text first."},
@@ -198,6 +203,29 @@ def normalize_page_path(page_path: str) -> str:
     if not normalized.endswith(".md"):
         normalized += ".md"
     return normalized
+
+
+def parse_capture_payload(payload: object) -> tuple[str, str, str] | None:
+    if not isinstance(payload, dict):
+        return None
+
+    text = payload.get("text")
+    if not isinstance(text, str):
+        return None
+
+    title = payload.get("title")
+    if title is None:
+        title = ""
+    elif not isinstance(title, str):
+        return None
+
+    source_url = payload.get("source_url")
+    if source_url is None:
+        source_url = ""
+    elif not isinstance(source_url, str):
+        return None
+
+    return text, title, source_url
 
 
 def render_home(repo_paths: RepoPaths) -> str:
@@ -490,7 +518,7 @@ def find_backlinks(repo_paths: RepoPaths, relative_path: str) -> list[tuple[str,
     return backlinks
 
 
-def render_metadata_value(value: object) -> str:
+def render_metadata_value(value: MetadataValue) -> str:
     if isinstance(value, list):
         return ", ".join(str(item) for item in value)
     return str(value)

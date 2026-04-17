@@ -4,7 +4,6 @@ import os
 import threading
 import webbrowser
 from pathlib import Path
-from typing import cast
 
 import typer
 
@@ -17,7 +16,7 @@ from llm_wiki.core.models import (
     LintResult,
     QueryResult,
     RepoPaths,
-    ResearchTemplate,
+    is_research_template,
 )
 from llm_wiki.core.paths import ensure_structure, is_placeholder_artifact, repo_relative
 from llm_wiki.core.telemetry import configure_logging, get_logger, log_event
@@ -139,7 +138,7 @@ def _print_query_result(result: QueryResult) -> None:
 
 
 def _open_path(base_dir: Path, relative_path: str) -> None:
-    absolute = (base_dir / "wiki" / relative_path.replace("wiki/", "")).resolve()
+    absolute = (base_dir / "wiki" / relative_path).resolve()
     open_in_obsidian(base_dir, absolute)
 
 
@@ -230,10 +229,10 @@ def query(
     open_page: bool = typer.Option(False, "--open"),
     base_dir: Path | None = typer.Option(None, "--base-dir", resolve_path=True),
 ) -> None:
-    if template not in RESEARCH_TEMPLATES:
+    if not is_research_template(template):
         typer.echo(f"Unsupported template: {template}. Choose from: {', '.join(RESEARCH_TEMPLATES)}")
         raise typer.Exit(code=1)
-    template_name = cast(ResearchTemplate, template)
+    template_name = template
     config, repo_paths = load_config_or_exit(base_dir)
     log_event(LOGGER, "command_started", command="query", base_dir=repo_paths.base_dir, template=template_name)
     client = build_client_or_exit(config)

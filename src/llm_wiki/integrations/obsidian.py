@@ -18,9 +18,7 @@ def obsidian_url(base_dir: Path, path: Path) -> str:
 
 def open_in_obsidian(base_dir: Path, path: Path) -> None:
     url = obsidian_url(base_dir, path)
-    result = subprocess.run(["open", url], check=False)
-    if result.returncode != 0:
-        subprocess.run(["open", path.as_posix()], check=False)
+    subprocess.run(["open", url], check=False)
 
 
 def reveal_in_finder(path: Path) -> None:

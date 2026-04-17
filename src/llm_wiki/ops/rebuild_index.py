@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from llm_wiki.core.markdown import link_target_for_path, load_markdown, summary_from_content
+from llm_wiki.core.markdown import link_target_for_path
 from llm_wiki.core.models import RepoPaths
-from llm_wiki.ops.search import iter_wiki_pages
+from llm_wiki.ops.search import iter_wiki_pages, page_summary
 
 SECTION_TITLES = {
     "sources": "Sources",
@@ -15,11 +15,8 @@ SECTION_TITLES = {
 def rebuild_index(repo_paths: RepoPaths) -> str:
     grouped: dict[str, list[str]] = {key: [] for key in SECTION_TITLES}
     for page in iter_wiki_pages(repo_paths):
-        metadata, body = load_markdown(page)
-        relative_path = page.relative_to(repo_paths.wiki_root).as_posix()
+        relative_path, _, summary = page_summary(repo_paths, page)
         group = relative_path.split("/", 1)[0]
-        title = str(metadata.get("title") or page.stem)
-        summary = summary_from_content(body, fallback=title)
         grouped[group].append(f"- [[{link_target_for_path(relative_path)}]] - {summary}")
 
     lines = [

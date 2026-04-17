@@ -138,12 +138,13 @@ def test_dashboard_capture_route_writes_note_and_returns_redirect(temp_workspace
         def __init__(self, config) -> None:
             self.config = config
 
-    processed: dict[str, object] = {}
+    processed_inbox_files: list[str] = []
+    processed_lint: bool | None = None
 
     def fake_run_process_once(config, repo_paths, client, *, lint, emit=None):
-        inbox_files = sorted(path.name for path in repo_paths.raw_inbox.glob("*.md"))
-        processed["inbox_files"] = inbox_files
-        processed["lint"] = lint
+        nonlocal processed_lint
+        processed_inbox_files[:] = sorted(path.name for path in repo_paths.raw_inbox.glob("*.md"))
+        processed_lint = lint
         return (
             IngestResult(
                 processed_sources=["raw/sources/20260415-clipboard-note.md"],
@@ -177,5 +178,18 @@ def test_dashboard_capture_route_writes_note_and_returns_redirect(temp_workspace
     assert "captured_from: dashboard" in content
     assert "source_url: https://example.com/note" in content
     assert "snapai icon --model gpt-1.5" in content
-    assert processed["inbox_files"] == [inbox_files[0].name]
-    assert processed["lint"] is True
+    assert processed_inbox_files == [inbox_files[0].name]
+    assert processed_lint is True
+
+
+def test_dashboard_capture_route_rejects_non_string_fields(temp_workspace) -> None:
+    _, paths = load_config(temp_workspace)
+    client = TestClient(create_dashboard_app(paths))
+
+    response = client.post(
+        "/capture",
+        json={"text": 123, "title": "Title", "source_url": ""},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Capture request must include string text, title, and source_url fields."

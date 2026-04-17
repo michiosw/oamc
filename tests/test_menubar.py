@@ -3,6 +3,9 @@ from __future__ import annotations
 import plistlib
 from pathlib import Path
 
+import pytest
+
+from llm_wiki.core.config import load_config
 from llm_wiki.integrations import menubar
 
 
@@ -127,3 +130,37 @@ def test_menu_status_and_activity_labels_are_human_friendly() -> None:
     assert menubar._menu_status_title("warn", 2) == "Status: Needs attention · 2 in inbox"
     assert menubar._short_activity_label("[2026-04-13] query | What does the wiki currently know about preparing Codex for Xcode and Swift projects?") == "query · What does the wiki currently know about..."
     assert menubar._short_activity_label("No activity yet") == "No activity yet"
+
+
+def test_background_tasks_propagate_unexpected_errors(temp_workspace: Path, monkeypatch) -> None:
+    config, repo_paths = load_config(temp_workspace)
+
+    def fake_capture(*args, **kwargs):
+        raise RuntimeError("capture failed")
+
+    def fake_process(*args, **kwargs):
+        raise RuntimeError("process failed")
+
+    monkeypatch.setattr(menubar, "capture_clipboard_to_inbox", fake_capture)
+
+    with pytest.raises(RuntimeError, match="capture failed"):
+        menubar._capture_clipboard_and_process(
+            config=config,
+            repo_paths=repo_paths,
+            process_lock=menubar.threading.Lock(),
+            lint=True,
+            notify=lambda *args, **kwargs: None,
+        )
+
+    monkeypatch.setattr(menubar, "capture_clipboard_to_inbox", lambda *args, **kwargs: None)
+    monkeypatch.setattr(menubar, "run_process_once", fake_process)
+    monkeypatch.setattr(menubar, "OpenAIWikiClient", lambda config: object())
+
+    with pytest.raises(RuntimeError, match="process failed"):
+        menubar._process_inbox(
+            config=config,
+            repo_paths=repo_paths,
+            process_lock=menubar.threading.Lock(),
+            lint=True,
+            notify=lambda *args, **kwargs: None,
+        )
