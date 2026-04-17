@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypeGuard
 
 from pydantic import BaseModel, Field
 
@@ -22,6 +22,19 @@ RESEARCH_TEMPLATES = (
     "open-questions",
     "decision-brief",
 )
+
+LintIssueCode = Literal["orphan_page", "missing_concept_page"]
+HealthStatus = Literal["ok", "warn", "error"]
+
+
+def is_research_template(value: str) -> TypeGuard[ResearchTemplate]:
+    return value in RESEARCH_TEMPLATES
+
+
+def normalize_research_template(value: str) -> ResearchTemplate:
+    if is_research_template(value):
+        return value
+    return "synthesis"
 
 
 class PathsConfig(BaseModel):
@@ -129,13 +142,13 @@ class QueryResult(BaseModel):
     title: str = ""
     answer_preview: str = ""
     content: str = ""
-    template: str = "synthesis"
+    template: ResearchTemplate = "synthesis"
     selected_candidates: list[str] = Field(default_factory=list)
     operation_id: str = ""
 
 
 class LintIssue(BaseModel):
-    code: Literal["orphan_page", "missing_concept_page"]
+    code: LintIssueCode
     relative_path: str | None = None
     detail: str
 
@@ -163,7 +176,7 @@ class LintResult(BaseModel):
 class HealthCheck(BaseModel):
     key: str
     label: str
-    status: Literal["ok", "warn", "error"]
+    status: HealthStatus
     detail: str
     recommendation: str = ""
 
@@ -182,5 +195,5 @@ class DoctorReport(BaseModel):
     latest_processed_source: str | None = None
     latest_ingest: ActivityEntry | None = None
     clippings_files: list[str] = Field(default_factory=list)
-    overall_status: Literal["ok", "warn", "error"] = "ok"
+    overall_status: HealthStatus = "ok"
     recommended_next_step: str = "System healthy. Clip into raw/inbox/ and ask the wiki."

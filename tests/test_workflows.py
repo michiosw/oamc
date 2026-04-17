@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 from llm_wiki.cli import app
 from llm_wiki.core.config import load_config
 from llm_wiki.core.health import build_doctor_report
+from llm_wiki.core.markdown import dump_markdown
 from llm_wiki.core.models import (
     IngestRequest,
     IngestResponse,
@@ -25,17 +26,26 @@ def read_fixture(path: Path, name: str) -> str:
     return (path / "tests" / "fixtures" / "golden" / name).read_text(encoding="utf-8")
 
 
+def _patch_build_client(monkeypatch: pytest.MonkeyPatch, client: LLMClient) -> None:
+    from llm_wiki import cli
+
+    monkeypatch.setattr(cli, "build_client", lambda config: client)
+
+
+def _draft(relative_path: str, title: str, body: str, *, tags: list[str] | None = None) -> PageDraft:
+    metadata: dict[str, object] = {"title": title}
+    if tags is not None:
+        metadata["tags"] = tags
+    return PageDraft(relative_path=relative_path, content=dump_markdown(metadata, body))
+
+
 class FakeLLMClient(LLMClient):
     def ingest(self, request: IngestRequest) -> IngestResponse:
         return IngestResponse(
-            source_page=PageDraft(
-                relative_path="sources/20260412-sample-note.md",
-                content="""---
-title: Sample Note
-tags:
-  - llm
----
-# Sample Note
+            source_page=_draft(
+                "sources/20260412-sample-note.md",
+                "Sample Note",
+                """# Sample Note
 
 ## Summary
 
@@ -53,37 +63,32 @@ This source discusses a personal LLM wiki workflow.
 
 - [[concepts/llm-wiki]]
 """,
+                tags=["llm"],
             ),
             entity_pages=[
-                PageDraft(
-                    relative_path="wiki/entities/obsidian.md",
-                    content="""---
-title: Obsidian
-tags:
-  - tool
----
-# Obsidian
+                _draft(
+                    "wiki/entities/obsidian.md",
+                    "Obsidian",
+                    """# Obsidian
 
 ## Overview
 
 Obsidian is the browsing layer for the vault.
 """,
+                    tags=["tool"],
                 )
             ],
             concept_pages=[
-                PageDraft(
-                    relative_path="concepts/llm-wiki.md",
-                    content="""---
-title: LLM Wiki
-tags:
-  - pattern
----
-# LLM Wiki
+                _draft(
+                    "concepts/llm-wiki.md",
+                    "LLM Wiki",
+                    """# LLM Wiki
 
 ## Definition
 
 An LLM-maintained markdown wiki that compounds knowledge over time.
 """,
+                    tags=["pattern"],
                 )
             ],
             notes="Ingested the sample note and updated related pages.",
@@ -91,14 +96,10 @@ An LLM-maintained markdown wiki that compounds knowledge over time.
 
     def query(self, request: QueryRequest) -> QueryResponse:
         return QueryResponse(
-            page=PageDraft(
-                relative_path="syntheses/design-patterns.md",
-                content="""---
-title: Design Patterns
-tags:
-  - synthesis
----
-# Design Patterns
+            page=_draft(
+                "syntheses/design-patterns.md",
+                "Design Patterns",
+                """# Design Patterns
 
 ## Question
 
@@ -108,6 +109,7 @@ What are the main design patterns in my notes?
 
 Use a compiled wiki, explicit source pages, and durable synthesis pages.
 """,
+                tags=["synthesis"],
             ),
             notes="Wrote a synthesis page for the question.",
         )
@@ -115,19 +117,16 @@ Use a compiled wiki, explicit source pages, and durable synthesis pages.
     def lint(self, request: LintRequest) -> LintResponse:
         return LintResponse(
             created_pages=[
-                PageDraft(
-                    relative_path="concepts/missing-link.md",
-                    content="""---
-title: Missing Link
-tags:
-  - concept
----
-# Missing Link
+                _draft(
+                    "concepts/missing-link.md",
+                    "Missing Link",
+                    """# Missing Link
 
 ## Definition
 
 A placeholder concept page created during lint repair.
 """,
+                    tags=["concept"],
                 )
             ],
             updated_pages=[],
@@ -145,19 +144,16 @@ class CapturingQueryLLMClient(LLMClient):
     def query(self, request: QueryRequest) -> QueryResponse:
         self.last_request = request
         return QueryResponse(
-            page=PageDraft(
-                relative_path="syntheses/scoped-answer.md",
-                content="""---
-title: Scoped Answer
-tags:
-  - synthesis
----
-# Scoped Answer
+            page=_draft(
+                "syntheses/scoped-answer.md",
+                "Scoped Answer",
+                """# Scoped Answer
 
 ## Summary Answer
 
 Scoped answer.
 """,
+                tags=["synthesis"],
             )
         )
 
@@ -177,9 +173,7 @@ class RuntimeErrorLLMClient(LLMClient):
 
 
 def test_cli_smoke_workflows(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
-    from llm_wiki import cli
-
-    monkeypatch.setattr(cli, "build_client", lambda config: FakeLLMClient())
+    _patch_build_client(monkeypatch, FakeLLMClient())
 
     source_path = temp_workspace / "raw" / "inbox" / "sample-note.md"
     source_path.write_text(
@@ -227,9 +221,7 @@ def test_init_command_creates_workspace(tmp_path: Path, runner: CliRunner) -> No
 
 
 def test_ingest_with_empty_inbox_exits_cleanly(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
-    from llm_wiki import cli
-
-    monkeypatch.setattr(cli, "build_client", lambda config: FakeLLMClient())
+    _patch_build_client(monkeypatch, FakeLLMClient())
     result = runner.invoke(app, ["ingest", "--base-dir", str(temp_workspace)])
     assert result.exit_code == 0, result.output
     assert "Inbox is empty" in result.output
@@ -238,9 +230,7 @@ def test_ingest_with_empty_inbox_exits_cleanly(temp_workspace: Path, runner: Cli
 def test_ingest_skips_placeholder_files_in_inbox(
     temp_workspace: Path, runner: CliRunner, monkeypatch
 ) -> None:
-    from llm_wiki import cli
-
-    monkeypatch.setattr(cli, "build_client", lambda config: FakeLLMClient())
+    _patch_build_client(monkeypatch, FakeLLMClient())
     (temp_workspace / "raw" / "inbox" / ".gitkeep").write_text("", encoding="utf-8")
     (temp_workspace / "raw" / "inbox" / "keep").write_text("keep\n", encoding="utf-8")
 
@@ -338,16 +328,8 @@ def test_start_command_launches_watch_and_dashboard(temp_workspace: Path, runner
 class FailingLLMClient(LLMClient):
     def ingest(self, request: IngestRequest) -> IngestResponse:
         return IngestResponse(
-            source_page=PageDraft(
-                relative_path="sources/example.md",
-                content="# Example\n",
-            ),
-            entity_pages=[
-                PageDraft(
-                    relative_path="wiki/not-allowed/example.md",
-                    content="# Invalid\n",
-                )
-            ],
+            source_page=_draft("sources/example.md", "Example", "# Example\n"),
+            entity_pages=[_draft("wiki/not-allowed/example.md", "Invalid", "# Invalid\n")],
         )
 
     def query(self, request: QueryRequest) -> QueryResponse:
@@ -430,9 +412,7 @@ def test_query_recovers_from_malformed_frontmatter(temp_workspace: Path) -> None
 
 
 def test_process_command_runs_ingest_and_lint(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
-    from llm_wiki import cli
-
-    monkeypatch.setattr(cli, "build_client", lambda config: FakeLLMClient())
+    _patch_build_client(monkeypatch, FakeLLMClient())
     source_path = temp_workspace / "raw" / "inbox" / "sample-note.md"
     source_path.write_text("# Sample Note\n", encoding="utf-8")
 
@@ -470,7 +450,7 @@ def test_capture_command_queues_note_without_processing(temp_workspace: Path, ru
 def test_capture_command_processes_clipboard_note(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
     from llm_wiki import cli
 
-    monkeypatch.setattr(cli, "build_client", lambda config: FakeLLMClient())
+    _patch_build_client(monkeypatch, FakeLLMClient())
     monkeypatch.setattr(
         cli,
         "capture_clipboard_to_inbox",
@@ -548,6 +528,61 @@ def test_doctor_report_detects_index_drift_and_malformed_page(temp_workspace: Pa
     assert page_check.status == "warn"
 
 
+def test_page_metadata_issues_reports_yaml_parse_errors(temp_workspace: Path) -> None:
+    from llm_wiki.core import health
+
+    page = temp_workspace / "wiki" / "concepts" / "broken.md"
+    page.write_text(
+        """---
+title: [broken
+type: concept
+created: 2026-04-17
+updated: 2026-04-17
+tags: []
+source_refs: []
+status: draft
+---
+# Broken
+""",
+        encoding="utf-8",
+    )
+
+    _, repo_paths = load_config(temp_workspace)
+    issues = health.page_metadata_issues(repo_paths)
+
+    assert len(issues) == 1
+    assert "invalid frontmatter" in issues[0]
+
+
+def test_page_metadata_issues_propagates_unexpected_parse_errors(temp_workspace: Path, monkeypatch) -> None:
+    from llm_wiki.core import health
+
+    page = temp_workspace / "wiki" / "concepts" / "bad.md"
+    page.write_text(
+        """---
+title: Bad
+type: concept
+created: 2026-04-17
+updated: 2026-04-17
+tags: []
+source_refs: []
+status: draft
+---
+# Bad
+
+## Sources
+- raw/sources/example.md
+""",
+        encoding="utf-8",
+    )
+
+    _, repo_paths = load_config(temp_workspace)
+    monkeypatch.setattr(health.frontmatter, "loads", lambda raw: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        health.page_metadata_issues(repo_paths)
+
+
 def test_status_reports_pending_inbox_next_step(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     (temp_workspace / "raw" / "inbox" / "queued.md").write_text("# Queued\n", encoding="utf-8")
@@ -559,9 +594,7 @@ def test_status_reports_pending_inbox_next_step(temp_workspace: Path, runner: Cl
 
 
 def test_process_command_reports_runtime_error_cleanly(temp_workspace: Path, runner: CliRunner, monkeypatch) -> None:
-    from llm_wiki import cli
-
-    monkeypatch.setattr(cli, "build_client", lambda config: RuntimeErrorLLMClient())
+    _patch_build_client(monkeypatch, RuntimeErrorLLMClient())
     (temp_workspace / "raw" / "inbox" / "sample-note.md").write_text("# Sample\n", encoding="utf-8")
 
     result = runner.invoke(app, ["process", "--no-lint", "--base-dir", str(temp_workspace)])

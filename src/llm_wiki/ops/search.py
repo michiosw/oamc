@@ -31,16 +31,31 @@ def iter_wiki_pages(repo_paths: RepoPaths) -> list[Path]:
 def list_candidates(repo_paths: RepoPaths) -> list[SearchCandidate]:
     candidates: list[SearchCandidate] = []
     for page in iter_wiki_pages(repo_paths):
-        metadata, body = load_markdown(page)
-        relative_path = page.relative_to(repo_paths.wiki_root).as_posix()
+        relative_path, title, summary = page_summary(
+            repo_paths,
+            page,
+            summary_fallback="",
+        )
         candidates.append(
-            SearchCandidate(
-                relative_path=relative_path,
-                title=str(metadata.get("title") or page.stem),
-                summary=summary_from_content(body, fallback=""),
-            )
+            SearchCandidate(relative_path=relative_path, title=title, summary=summary)
         )
     return candidates
+
+
+def page_summary(
+    repo_paths: RepoPaths,
+    page: Path,
+    *,
+    summary_fallback: str | None = None,
+) -> tuple[str, str, str]:
+    metadata, body = load_markdown(page)
+    relative_path = page.relative_to(repo_paths.wiki_root).as_posix()
+    title = str(metadata.get("title") or page.stem)
+    summary = summary_from_content(
+        body,
+        fallback=summary_fallback if summary_fallback is not None else title,
+    )
+    return relative_path, title, summary
 
 
 def _score_text(query_terms: list[str], text: str, weight: float) -> float:

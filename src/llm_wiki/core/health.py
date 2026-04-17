@@ -7,9 +7,9 @@ import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Literal
 
 import frontmatter
+import yaml
 
 from llm_wiki.core.env import api_key_issue
 from llm_wiki.core.markdown import extract_wikilinks
@@ -19,6 +19,7 @@ from llm_wiki.core.models import (
     AppConfig,
     DoctorReport,
     HealthCheck,
+    HealthStatus,
     RepoPaths,
 )
 from llm_wiki.core.paths import is_placeholder_artifact, repo_relative
@@ -241,7 +242,7 @@ def build_doctor_report(
     latest_entry = parse_latest_log_entry(repo_paths)
     latest_log_heading = latest_entry.heading if latest_entry else None
 
-    overall_status: Literal["ok", "warn", "error"] = "ok"
+    overall_status: HealthStatus = "ok"
     if any(check.status == "error" for check in checks):
         overall_status = "error"
     elif any(check.status == "warn" for check in checks):
@@ -316,7 +317,7 @@ def page_metadata_issues(repo_paths: RepoPaths) -> list[str]:
         raw = page.read_text(encoding="utf-8")
         try:
             post = frontmatter.loads(raw)
-        except Exception as exc:
+        except yaml.YAMLError as exc:
             issues.append(f"{relative_path}: invalid frontmatter ({exc})")
             continue
         metadata = dict(post.metadata)

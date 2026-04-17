@@ -12,10 +12,12 @@ from typing import Any, cast
 from llm_wiki import __version__
 from llm_wiki.core.config import load_config
 from llm_wiki.core.health import build_doctor_report
+from llm_wiki.core.models import AppConfig, RepoPaths
 from llm_wiki.llm.openai_client import OpenAIWikiClient
 from llm_wiki.ops.capture import capture_clipboard_to_inbox
 from llm_wiki.runtime.studio import (
     DashboardServer,
+    Emitter,
     inbox_count,
     latest_log_heading,
     run_process_once,
@@ -334,20 +336,13 @@ def run_menubar(
         def capture_clipboard(self, _sender: object) -> None:
             def _task() -> None:
                 try:
-                    with process_lock:
-                        capture_clipboard_to_inbox(
-                            repo_paths,
-                            captured_from="menubar",
-                        )
-                        run_process_once(
-                            config,
-                            repo_paths,
-                            OpenAIWikiClient(config),
-                            lint=lint,
-                            emit=notify,
-                        )
-                except Exception as exc:
-                    rumps.notification(APP_NAME, "Clipboard capture issue", str(exc))
+                    _capture_clipboard_and_process(
+                        config=config,
+                        repo_paths=repo_paths,
+                        process_lock=process_lock,
+                        lint=lint,
+                        notify=notify,
+                    )
                 finally:
                     self.refresh(None)
 
@@ -357,16 +352,13 @@ def run_menubar(
         def process_now(self, _sender: object) -> None:
             def _task() -> None:
                 try:
-                    with process_lock:
-                        run_process_once(
-                            config,
-                            repo_paths,
-                            OpenAIWikiClient(config),
-                            lint=lint,
-                            emit=notify,
-                        )
-                except Exception as exc:
-                    rumps.notification(APP_NAME, "Processing issue", str(exc))
+                    _process_inbox(
+                        config=config,
+                        repo_paths=repo_paths,
+                        process_lock=process_lock,
+                        lint=lint,
+                        notify=notify,
+                    )
                 finally:
                     self.refresh(None)
 
@@ -409,3 +401,43 @@ def _short_activity_label(heading: str) -> str:
         shortened = title if len(title) <= 42 else f"{title[:39].rstrip()}..."
         return f"{operation} · {shortened}"
     return heading
+
+
+def _capture_clipboard_and_process(
+    *,
+    config: AppConfig,
+    repo_paths: RepoPaths,
+    process_lock: threading.Lock,
+    lint: bool,
+    notify: Emitter,
+) -> None:
+    with process_lock:
+        capture_clipboard_to_inbox(
+            repo_paths,
+            captured_from="menubar",
+        )
+        run_process_once(
+            config,
+            repo_paths,
+            OpenAIWikiClient(config),
+            lint=lint,
+            emit=notify,
+        )
+
+
+def _process_inbox(
+    *,
+    config: AppConfig,
+    repo_paths: RepoPaths,
+    process_lock: threading.Lock,
+    lint: bool,
+    notify: Emitter,
+) -> None:
+    with process_lock:
+        run_process_once(
+            config,
+            repo_paths,
+            OpenAIWikiClient(config),
+            lint=lint,
+            emit=notify,
+        )

@@ -27,6 +27,16 @@ def test_markdown_round_trip(tmp_path) -> None:
     assert "Body text." in body
 
 
+def test_load_markdown_handles_plain_markdown(tmp_path) -> None:
+    path = tmp_path / "plain.md"
+    path.write_text("# Plain\n\nBody text.\n", encoding="utf-8")
+
+    metadata, body = load_markdown(path)
+
+    assert metadata == {}
+    assert body == "# Plain\n\nBody text."
+
+
 def test_extract_wikilinks() -> None:
     content = "See [[concepts/llm-wiki]] and [[entities/openai|OpenAI]]."
     assert extract_wikilinks(content) == ["concepts/llm-wiki", "entities/openai"]
