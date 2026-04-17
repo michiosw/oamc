@@ -164,3 +164,44 @@ def test_background_tasks_propagate_unexpected_errors(temp_workspace: Path, monk
             lint=True,
             notify=lambda *args, **kwargs: None,
         )
+
+
+def test_background_action_notifies_logs_and_refreshes_before_reraising(monkeypatch) -> None:
+    notifications: list[tuple[str, str, str]] = []
+    log_events: list[dict[str, str]] = []
+    refreshed = False
+
+    def fail() -> None:
+        raise RuntimeError("background failed")
+
+    def refresh() -> None:
+        nonlocal refreshed
+        refreshed = True
+
+    def fake_log_event(logger, event: str, **fields: str) -> None:
+        log_events.append({"event": event, **fields})
+
+    monkeypatch.setattr(menubar, "log_event", fake_log_event)
+
+    with pytest.raises(RuntimeError, match="background failed"):
+        menubar._run_background_action(
+            action="capture_clipboard",
+            failure_title="Clipboard capture issue",
+            task=fail,
+            notify_user=lambda title, subtitle, message: notifications.append(
+                (title, subtitle, message)
+            ),
+            refresh=refresh,
+        )
+
+    assert notifications == [
+        (menubar.APP_NAME, "Clipboard capture issue", "background failed")
+    ]
+    assert log_events == [
+        {
+            "event": "menubar_background_action_failed",
+            "action": "capture_clipboard",
+            "error": "background failed",
+        }
+    ]
+    assert refreshed is True
