@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/).
 
+## [0.6.0](https://github.com/michiosw/oamc/compare/v0.5.1...v0.6.0) (2026-04-27)
+
+
+### Features
+
+* **dashboard:** redesign UI with hero ask, aurora, capture dialog ([3960e47](https://github.com/michiosw/oamc/commit/3960e47d3892ba0176efe721e2f70b89d181f581))
+
+
+### Bug Fixes
+
+* **dashboard:** drop unused section local in render_page ([e92dcde](https://github.com/michiosw/oamc/commit/e92dcded2ac7e8b7655cb7b5949ff31c91a4c3f5))
+* **dashboard:** horizontal rail scroll, warm card shadows, polish pass ([764bbbb](https://github.com/michiosw/oamc/commit/764bbbb596a882e3aad06cfe1f993c9192364f3b))
+
 ## [0.5.1](https://github.com/michiosw/oamc/compare/v0.5.0...v0.5.1) (2026-04-17)
 
 
