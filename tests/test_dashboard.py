@@ -25,8 +25,8 @@ def test_dashboard_home_and_search(temp_workspace) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "oamc" in response.text
-    assert "Research mode" in response.text
-    assert "Paste a copied note into the wiki pipeline." in response.text
+    assert "Ask the wiki" in response.text
+    assert "data-capture-form" in response.text
 
     response = client.get("/search", params={"q": "frontend"})
     assert response.status_code == 200
@@ -97,8 +97,8 @@ def test_dashboard_ask_route_renders_saved_answer(temp_workspace, monkeypatch) -
     assert "Frontend Summary" in response.text
     assert "Saved answer." in response.text
     assert "/page/syntheses/frontend-summary.md" in response.text
-    assert "Open in Obsidian" in response.text
-    assert 'value="compare" selected' in response.text
+    assert "Continue in Obsidian" in response.text
+    assert 'value="compare" checked' in response.text
 
 
 def test_dashboard_open_route_uses_obsidian_and_finder_actions(temp_workspace, monkeypatch) -> None:

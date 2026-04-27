@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import threading
 from datetime import datetime
@@ -32,11 +33,38 @@ from llm_wiki.ops.capture import capture_text_to_inbox
 from llm_wiki.ops.query import run_query
 from llm_wiki.ops.search import iter_wiki_pages, search_pages
 
-BODY_FONT = '"Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif'
-DISPLAY_FONT = '"Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif'
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 MD = MarkdownIt("commonmark", {"html": False, "linkify": True}).enable("table")
 MetadataValue = str | int | float | bool | None | list[object]
+
+EXAMPLE_PROMPTS: tuple[str, ...] = (
+    "agent skill packages",
+    "frontend design",
+    "ai productivity",
+    "browser emulation",
+    "engineering decision-making",
+    "altitude in prompting",
+    "design systems",
+    "rate limiting",
+    "anti-bot solutions",
+    "the assembly line workflow",
+)
+
+TEMPLATE_GLYPHS: dict[str, str] = {
+    "synthesis": "✦",
+    "compare": "⇋",
+    "timeline": "↦",
+    "open-questions": "?",
+    "decision-brief": "▲",
+}
+
+TEMPLATE_BLURBS: dict[str, str] = {
+    "synthesis": "Pull threads together into a saved page.",
+    "compare": "Lay options side by side.",
+    "timeline": "Order the story chronologically.",
+    "open-questions": "Surface what's still unknown.",
+    "decision-brief": "Argue toward a single recommendation.",
+}
 
 
 def create_dashboard_app(
@@ -74,7 +102,7 @@ def create_dashboard_app(
         question = q.strip()
         template_name = normalize_research_template(template)
         if not question:
-            return render_layout("Ask", render_ask_form(template=template_name))
+            return render_layout("Ask", render_ask_stage(template=template_name))
 
         config, _ = load_config(repo_paths.base_dir)
         scopes = [item.strip() for item in scope.split(",") if item.strip()]
@@ -228,6 +256,11 @@ def parse_capture_payload(payload: object) -> tuple[str, str, str] | None:
     return text, title, source_url
 
 
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+
+
 def render_home(repo_paths: RepoPaths) -> str:
     config, _ = load_config(repo_paths.base_dir)
     report = build_doctor_report(config, repo_paths, assume_dashboard_serving=True)
@@ -246,137 +279,268 @@ def render_home(repo_paths: RepoPaths) -> str:
     prioritized_pages.extend(page for page in pages if page != latest_source_page)
     recent = prioritized_pages[:8]
     stats = {
-        "Sources": len([page for page in (repo_paths.wiki_root / "sources").glob("*.md") if not is_placeholder_artifact(page)]),
-        "Entities": len([page for page in (repo_paths.wiki_root / "entities").glob("*.md") if not is_placeholder_artifact(page)]),
-        "Concepts": len([page for page in (repo_paths.wiki_root / "concepts").glob("*.md") if not is_placeholder_artifact(page)]),
-        "Syntheses": len([page for page in (repo_paths.wiki_root / "syntheses").glob("*.md") if not is_placeholder_artifact(page)]),
+        "sources": len([page for page in (repo_paths.wiki_root / "sources").glob("*.md") if not is_placeholder_artifact(page)]),
+        "entities": len([page for page in (repo_paths.wiki_root / "entities").glob("*.md") if not is_placeholder_artifact(page)]),
+        "concepts": len([page for page in (repo_paths.wiki_root / "concepts").glob("*.md") if not is_placeholder_artifact(page)]),
+        "syntheses": len([page for page in (repo_paths.wiki_root / "syntheses").glob("*.md") if not is_placeholder_artifact(page)]),
     }
-
-    stat_html = "".join(
-        f'<div class="stat"><div class="stat-label">{escape(label)}</div><div class="stat-value">{value}</div></div>'
-        for label, value in stats.items()
-    )
-    recent_html = "".join(render_page_list_item(repo_paths, page) for page in recent) or "<li>No pages yet.</li>"
     inbox_count = len([path for path in repo_paths.raw_inbox.glob("*") if path.is_file() and not is_placeholder_artifact(path)])
-    latest_ingest_html = render_latest_ingest(repo_paths, report)
+
+    ticker_html = render_ticker(stats, inbox_count, report)
+    rail_html = render_recent_rail(repo_paths, recent)
+    ingest_html = render_latest_ingest(repo_paths, report)
     health_html = render_health_surface(repo_paths, report, inbox_count)
+
     return f"""
-    <section class="hero-stage">
-      <div class="hero-grid">
-        <div class="hero">
-          <p class="eyebrow">Local wiki workspace</p>
-          <h1>Research against the wiki, not against scattered notes.</h1>
-          <p class="lede">Clip sources or paste copied notes into the inbox pipeline, let oamc process them, then ask one bounded research question at a time.</p>
-        </div>
-        <div class="hero-note">
-          <p class="eyebrow">Official workflow</p>
-          <p class="meta-line">Everything still flows through <code>raw/inbox/</code>. Clipboard capture writes a real markdown source there before ingest.</p>
-          <p class="meta-line">On macOS, the canonical runtime is <code>uv run llm-wiki install-menubar</code>.</p>
-        </div>
+    <section class="stage" data-stage="home">
+      {render_aurora()}
+      <div class="hero">
+        <p class="kicker">your private research engine · oamc</p>
+        <h1 class="display">
+          <span class="display-line">Ask the wiki<span class="display-accent">.</span></span>
+        </h1>
+        <p class="subhead">
+          What does it know about
+          <span class="rotor" data-rotor>
+            <span class="rotor-word" data-rotor-word>{escape(EXAMPLE_PROMPTS[0])}</span>
+            <span class="rotor-caret" aria-hidden="true">▍</span>
+          </span>?
+        </p>
+        {render_ask_form()}
       </div>
+      {ticker_html}
     </section>
-    <section class="editorial-band">
-      {render_ask_form(compact=True)}
-      <div class="stats-panel">
-        <p class="eyebrow">Knowledge shape</p>
-        <div class="stats">{stat_html}</div>
-      </div>
-    </section>
-    {render_capture_form(compact=True)}
-    {latest_ingest_html}
-    <section class="split">
-      <div class="section-panel">
-        <h2>Recent wiki pages</h2>
-        <p class="meta-line">This list includes the newest source page first, then the most recently touched wiki pages.</p>
-        <ul class="page-list">{recent_html}</ul>
-      </div>
-      <div>
-        {health_html}
+    {ingest_html}
+    {rail_html}
+    {health_html}
+    """
+
+
+def render_aurora() -> str:
+    return """
+    <div class="aurora" aria-hidden="true">
+      <span class="aurora-blob aurora-blob-1"></span>
+      <span class="aurora-blob aurora-blob-2"></span>
+      <span class="aurora-blob aurora-blob-3"></span>
+    </div>
+    """
+
+
+def render_ticker(stats: dict[str, int], inbox_count: int, report: DoctorReport) -> str:
+    last_log = report.latest_log_heading or "no activity yet"
+    items = [
+        ("sources", stats["sources"]),
+        ("entities", stats["entities"]),
+        ("concepts", stats["concepts"]),
+        ("syntheses", stats["syntheses"]),
+    ]
+    stat_chips = "".join(
+        f'<span class="ticker-chip"><strong>{value}</strong>&nbsp;<span>{escape(label)}</span></span>'
+        for label, value in items
+    )
+    inbox_chip = (
+        f'<span class="ticker-chip ticker-chip-active"><strong>{inbox_count}</strong>&nbsp;<span>in inbox</span></span>'
+        if inbox_count
+        else '<span class="ticker-chip ticker-chip-quiet"><span>inbox quiet</span></span>'
+    )
+    return f"""
+    <div class="ticker">
+      {stat_chips}
+      {inbox_chip}
+      <span class="ticker-divider" aria-hidden="true"></span>
+      <span class="ticker-meta">last activity · {escape(last_log)}</span>
+    </div>
+    """
+
+
+def render_ask_stage(*, question: str = "", scope: str = "", template: str = "synthesis") -> str:
+    return f"""
+    <section class="stage" data-stage="ask">
+      {render_aurora()}
+      <div class="hero">
+        <p class="kicker">research mode</p>
+        <h1 class="display"><span class="display-line">A question, well posed.</span></h1>
+        <p class="subhead">Each ask becomes a saved synthesis page — not a disposable answer.</p>
+        {render_ask_form(question=question, scope=scope, template=template)}
       </div>
     </section>
     """
 
 
-def render_ask_form(
-    question: str = "",
-    scope: str = "",
-    template: str = "synthesis",
-    *,
-    compact: bool = False,
-) -> str:
-    panel_class = "ask-panel ask-panel-compact" if compact else "ask-panel"
-    template_options = "".join(
-        f'<option value="{escape(option)}"{" selected" if option == template else ""}>{escape(render_template_label(option))}</option>'
+def render_ask_form(question: str = "", scope: str = "", template: str = "synthesis") -> str:
+    template_buttons = "".join(
+        f"""
+        <label class="seg-option" data-tooltip="{escape(TEMPLATE_BLURBS.get(option, ''))}">
+          <input type="radio" name="template" value="{escape(option)}"{' checked' if option == template else ''}>
+          <span class="seg-glyph" aria-hidden="true">{TEMPLATE_GLYPHS.get(option, '·')}</span>
+          <span class="seg-label">{escape(render_template_label(option))}</span>
+        </label>
+        """
         for option in RESEARCH_TEMPLATES
     )
+    initial_scopes = [item.strip() for item in scope.split(",") if item.strip()]
+    initial_scope_pills = "".join(
+        f'<span class="tag-pill"><span>{escape(item)}</span><button type="button" data-tag-remove aria-label="Remove {escape(item)}">×</button></span>'
+        for item in initial_scopes
+    )
+
     return f"""
-    <section class="{panel_class}">
-      <div class="panel-heading">
-        <div>
-          <p class="eyebrow">Research mode</p>
-          <h2>Ask what the wiki currently knows.</h2>
-        </div>
-        <p class="template-note">Default outcome: a saved synthesis page, not a disposable answer.</p>
+    <form action="/ask" method="get" class="ask" data-ask-form>
+      <div class="ask-shell">
+        <span class="ask-icon" aria-hidden="true">✦</span>
+        <input
+          type="search"
+          name="q"
+          id="ask-input"
+          class="ask-input"
+          value="{escape(question)}"
+          placeholder="Ask anything the wiki should know."
+          autocomplete="off"
+          spellcheck="false"
+          required>
+        <button type="submit" class="ask-submit">
+          <span class="ask-submit-label">Ask</span>
+          <span class="ask-submit-kbd" aria-hidden="true">↵</span>
+        </button>
       </div>
-      <form action="/ask" method="get" class="ask-form">
-        <input type="search" name="q" value="{escape(question)}" placeholder="What does the wiki currently know about..." required>
-        <div class="ask-controls">
-          <input type="text" name="scope" value="{escape(scope)}" placeholder="Optional scope: gpt-5-4, frontend-design">
-          <select name="template">{template_options}</select>
-          <button type="submit">Ask</button>
+      <div class="ask-meta">
+        <div class="tag-input" data-tag-input>
+          <span class="tag-input-prefix">scope</span>
+          <div class="tag-pills" data-tag-pills>{initial_scope_pills}</div>
+          <input
+            type="text"
+            class="tag-input-field"
+            data-tag-field
+            placeholder="Press enter to add a topic…"
+            autocomplete="off">
+          <input type="hidden" name="scope" value="{escape(scope)}" data-tag-hidden>
         </div>
-      </form>
-      <p class="helper">Every serious question writes a synthesis page, updates the index, and is meant to be continued in Obsidian.</p>
-    </section>
+        <div class="seg" role="radiogroup" aria-label="Research template">
+          {template_buttons}
+        </div>
+      </div>
+    </form>
     """
 
 
-def render_capture_form(*, compact: bool = False) -> str:
-    panel_class = "capture-panel capture-panel-compact" if compact else "capture-panel"
-    return f"""
-    <section class="{panel_class}">
-      <div class="panel-heading">
-        <div>
-          <p class="eyebrow">Capture mode</p>
-          <h2>Paste a copied note into the wiki pipeline.</h2>
-        </div>
-        <p class="template-note">Best for prompts, copied chat snippets, command recipes, or partial notes that are not worth a full web clip.</p>
-      </div>
-      <form class="capture-form" data-capture-form>
-        <textarea name="text" placeholder="Paste the note you copied here..." required></textarea>
-        <div class="capture-controls">
+def render_capture_dialog() -> str:
+    return """
+    <dialog class="capture-dialog" data-capture-dialog>
+      <form class="capture" data-capture-form method="dialog">
+        <header class="capture-head">
+          <div>
+            <p class="kicker">capture · ⌘K</p>
+            <h2>Drop a note into the pipeline.</h2>
+          </div>
+          <button type="button" class="ghost-btn" data-capture-close aria-label="Close">esc</button>
+        </header>
+        <textarea name="text" placeholder="Paste a chat snippet, prompt, recipe, or copied note…" required></textarea>
+        <div class="capture-fields">
           <input type="text" name="title" placeholder="Optional title">
           <input type="url" name="source_url" placeholder="Optional source URL">
-          <button type="submit">Capture And Process</button>
         </div>
+        <div class="capture-actions">
+          <p class="capture-hint">writes to <code>raw/inbox/</code> and runs ingest</p>
+          <button type="submit" class="primary-btn">
+            <span data-capture-label>Capture &amp; process</span>
+          </button>
+        </div>
+        <p class="capture-status" data-capture-status aria-live="polite"></p>
       </form>
-      <p class="helper">oamc writes a markdown file into <code>raw/inbox/</code>, then processes it with the same ingest pipeline as normal clips.</p>
-      <p class="capture-status" data-capture-status aria-live="polite"></p>
+    </dialog>
+    """
+
+
+def render_recent_rail(repo_paths: RepoPaths, recent: list[Path]) -> str:
+    if not recent:
+        return ""
+    cards = "".join(render_recent_card(repo_paths, page, idx) for idx, page in enumerate(recent))
+    return f"""
+    <section class="rail-section">
+      <header class="section-head">
+        <p class="kicker">recently touched</p>
+        <h2>What the wiki has been chewing on.</h2>
+      </header>
+      <div class="rail" role="list">
+        {cards}
+      </div>
     </section>
     """
+
+
+def render_recent_card(repo_paths: RepoPaths, page: Path, idx: int) -> str:
+    metadata, body = load_markdown(page)
+    relative_path = page.relative_to(repo_paths.wiki_root).as_posix()
+    title = str(metadata.get("title") or page.stem)
+    summary = extract_preview_line(body)
+    section = relative_path.split("/", 1)[0] if "/" in relative_path else "wiki"
+    age_label = _age_label(page.stat().st_mtime)
+    delay_ms = min(idx * 50, 350)
+    return f"""
+    <a class="rail-card" role="listitem" href="/page/{escape(relative_path)}" style="animation-delay: {delay_ms}ms">
+      <div class="rail-card-meta">
+        <span class="rail-card-section">{escape(section)}</span>
+        <span class="rail-age">{escape(age_label)}</span>
+      </div>
+      <h3 class="rail-title">{escape(title)}</h3>
+      <p class="rail-summary">{escape(summary)}</p>
+      <div class="rail-card-arrow" aria-hidden="true">→</div>
+    </a>
+    """
+
+
+def _age_label(mtime: float) -> str:
+    delta = datetime.now() - datetime.fromtimestamp(mtime)
+    seconds = int(delta.total_seconds())
+    if seconds < 60:
+        return "just now"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86400:
+        return f"{seconds // 3600}h"
+    if seconds < 86400 * 14:
+        return f"{seconds // 86400}d"
+    return datetime.fromtimestamp(mtime).strftime("%b %d")
 
 
 def render_search(repo_paths: RepoPaths, query: str) -> str:
     candidates = search_pages(repo_paths, query, top_k=20)
     if not candidates:
-        return f"<section><h1>No results</h1><p class='lede'>No wiki pages matched <code>{escape(query)}</code>.</p></section>"
+        return f"""
+        <section class="stage stage-narrow">
+          {render_aurora()}
+          <div class="hero">
+            <p class="kicker">search</p>
+            <h1 class="display"><span class="display-line">No matches.</span></h1>
+            <p class="subhead">Nothing in the wiki for <code>{escape(query)}</code>. Try a broader phrase or capture more sources.</p>
+          </div>
+        </section>
+        """
 
     items = []
-    for candidate in candidates:
+    for idx, candidate in enumerate(candidates):
+        section = candidate.relative_path.split("/", 1)[0] if "/" in candidate.relative_path else "wiki"
         items.append(
             f"""
-            <li class="result">
+            <li class="result" style="animation-delay: {min(idx * 30, 300)}ms">
+              <div class="result-meta">
+                <span class="result-section">{escape(section)}</span>
+                <span class="result-path">{escape(candidate.relative_path)}</span>
+              </div>
               <a href="/page/{escape(candidate.relative_path)}" class="result-title">{escape(candidate.title)}</a>
-              <div class="result-path">{escape(candidate.relative_path)}</div>
               <p class="result-summary">{escape(candidate.summary)}</p>
             </li>
             """
         )
     return f"""
-    <section class="section-panel">
-      <p class="eyebrow">Search</p>
-      <h1>{escape(query)}</h1>
-      <p class="meta-line">Top matches across sources, entities, concepts, and syntheses.</p>
+    <section class="stage stage-narrow">
+      {render_aurora()}
+      <div class="hero">
+        <p class="kicker">search · {len(candidates)} matches</p>
+        <h1 class="display"><span class="display-line">{escape(query)}</span></h1>
+      </div>
+    </section>
+    <section class="results-section">
       <ul class="result-list">{''.join(items)}</ul>
     </section>
     """
@@ -389,55 +553,69 @@ def render_ask_result(
     template: str,
     result: QueryResult,
 ) -> str:
-    context_html = "".join(f"<li>{escape(candidate)}</li>" for candidate in result.selected_candidates) or "<li>No context pages were selected.</li>"
+    context_chips = "".join(
+        f'<a class="chip" href="/page/{escape(candidate)}">{escape(candidate)}</a>'
+        for candidate in result.selected_candidates
+    ) or '<span class="chip chip-empty">no context pages selected</span>'
     saved_html = (
-        f'<p class="meta-line">Saved to <a href="/page/{escape(result.page_path)}">{escape(result.page_path)}</a></p>'
+        f'<a class="saved-link" href="/page/{escape(result.page_path)}">saved → {escape(result.page_path)}</a>'
         if result.page_path
         else ""
     )
     action_html = ""
     if result.page_path:
         action_html = f"""
-        <div class="action-row">
-          <a class="action-link" href="/open?kind=wiki&path={escape(result.page_path)}&target=obsidian">Open in Obsidian</a>
-          <a class="action-link action-link-muted" href="/open?kind=wiki&path={escape(result.page_path)}&target=finder">Reveal in Finder</a>
+        <div class="answer-actions">
+          <a class="primary-btn" href="/open?kind=wiki&path={escape(result.page_path)}&target=obsidian">
+            <span>Continue in Obsidian</span>
+            <span aria-hidden="true">↗</span>
+          </a>
+          <a class="ghost-btn" href="/open?kind=wiki&path={escape(result.page_path)}&target=finder">Reveal in Finder</a>
         </div>
         """
     return f"""
-    {render_ask_form(question, scope, template)}
-    <section class="answer-panel">
-      <div class="panel-heading panel-heading-tight">
-        <div>
-          <p class="eyebrow">Saved synthesis</p>
-          <h1>{escape(result.title)}</h1>
-        </div>
+    <section class="stage stage-narrow">
+      {render_aurora()}
+      <div class="hero">
+        <p class="kicker">saved {escape(render_template_label(template).lower())} · {datetime.now().strftime("%Y-%m-%d %H:%M")}</p>
+        <h1 class="display"><span class="display-line">{escape(result.title)}</span></h1>
+        {saved_html}
+        {action_html}
       </div>
-      {saved_html}
-      {action_html}
-      <div class="answer-copy">{render_markdown(result.answer_preview)}</div>
     </section>
-    <section class="split">
-      <div class="section-panel">
-        <h2>Context pages</h2>
-        <ul class="link-list">{context_html}</ul>
-      </div>
-      <div class="section-panel">
-        <h2>What happened</h2>
-        <p class="meta-line">The saved synthesis is the primary artifact. The inline answer is only a preview.</p>
-        <p class="meta-line">Keep exploring from the saved page in Obsidian, not from transient chat context.</p>
-      </div>
+    <section class="answer-section">
+      <article class="answer-body">{render_markdown(result.answer_preview)}</article>
+      <aside class="answer-side">
+        <p class="kicker">context pages</p>
+        <div class="chips">{context_chips}</div>
+        <p class="kicker kicker-spaced">your question</p>
+        <p class="answer-question">{escape(question)}</p>
+      </aside>
+    </section>
+    <section class="ask-followup">
+      <header class="section-head">
+        <p class="kicker">follow up</p>
+        <h2>Push the synthesis further.</h2>
+        <p class="section-meta">A new question keeps the same scope &amp; template by default.</p>
+      </header>
+      {render_ask_form(question="", scope=scope, template=template)}
     </section>
     """
 
 
 def render_ask_error(question: str, scope: str, template: str, message: str) -> str:
     return f"""
-    {render_ask_form(question, scope, template)}
-    <section class="answer-panel">
-      <p class="eyebrow">Query failed</p>
-      <h1>Could not ask the wiki yet.</h1>
-      <p class="lede">{escape(message)}</p>
-      <p class="meta-line">Check your <code>.env</code> file and make sure <code>OPENAI_API_KEY</code> is set.</p>
+    <section class="stage stage-narrow">
+      {render_aurora()}
+      <div class="hero">
+        <p class="kicker">query failed</p>
+        <h1 class="display"><span class="display-line">Could not ask the wiki.</span></h1>
+        <p class="subhead">{escape(message)}</p>
+        <p class="subhead-muted">Check your <code>.env</code> file and confirm <code>OPENAI_API_KEY</code> is set.</p>
+      </div>
+    </section>
+    <section class="ask-followup">
+      {render_ask_form(question=question, scope=scope, template=template)}
     </section>
     """
 
@@ -445,36 +623,46 @@ def render_ask_error(question: str, scope: str, template: str, message: str) -> 
 def render_page(repo_paths: RepoPaths, target: Path) -> str:
     metadata, body = load_markdown(target)
     relative_path = target.relative_to(repo_paths.wiki_root).as_posix()
+    section = relative_path.split("/", 1)[0] if "/" in relative_path else "wiki"
     title = str(metadata.get("title") or target.stem)
     rendered = render_markdown(body)
     backlinks = find_backlinks(repo_paths, relative_path)
     backlinks_html = "".join(
         f'<li><a href="/page/{escape(path)}">{escape(label)}</a></li>'
         for path, label in backlinks
-    ) or "<li>No backlinks yet.</li>"
-    metadata_html = "".join(
-        f'<li><span>{escape(key)}</span><strong>{escape(render_metadata_value(value))}</strong></li>'
+    ) or "<li class=\"empty\">No backlinks yet.</li>"
+    metadata_pills = "".join(
+        f'<span class="meta-pill"><span class="meta-pill-key">{escape(key)}</span><span class="meta-pill-val">{escape(render_metadata_value(value))}</span></span>'
         for key, value in metadata.items()
         if key in {"type", "created", "updated", "status"}
     )
     actions = f"""
-    <div class="action-row">
-      <a class="action-link" href="/open?kind=wiki&path={escape(relative_path)}&target=obsidian">Open in Obsidian</a>
-      <a class="action-link action-link-muted" href="/open?kind=wiki&path={escape(relative_path)}&target=finder">Reveal in Finder</a>
+    <div class="answer-actions">
+      <a class="primary-btn" href="/open?kind=wiki&path={escape(relative_path)}&target=obsidian">
+        <span>Open in Obsidian</span>
+        <span aria-hidden="true">↗</span>
+      </a>
+      <a class="ghost-btn" href="/open?kind=wiki&path={escape(relative_path)}&target=finder">Reveal in Finder</a>
     </div>
     """
+    breadcrumb = relative_path.replace("/", " › ").removesuffix(".md")
     return f"""
-    <article class="page">
-      <p class="eyebrow">{escape(relative_path)}</p>
-      <h1>{escape(title)}</h1>
-      <ul class="meta-list">{metadata_html}</ul>
-      {actions}
-      <div class="markdown-body">{rendered}</div>
-    </article>
-    <aside class="sidebar">
-      <h2>Backlinks</h2>
-      <ul class="link-list">{backlinks_html}</ul>
-    </aside>
+    <section class="stage stage-narrow">
+      {render_aurora()}
+      <div class="hero">
+        <p class="kicker">{escape(breadcrumb)}</p>
+        <h1 class="display"><span class="display-line">{escape(title)}</span></h1>
+        <div class="meta-pills">{metadata_pills}</div>
+        {actions}
+      </div>
+    </section>
+    <section class="page-section">
+      <article class="markdown-body">{rendered}</article>
+      <aside class="page-side">
+        <p class="kicker">backlinks</p>
+        <ul class="link-list">{backlinks_html}</ul>
+      </aside>
+    </section>
     """
 
 
@@ -521,19 +709,10 @@ def find_backlinks(repo_paths: RepoPaths, relative_path: str) -> list[tuple[str,
 def render_metadata_value(value: MetadataValue) -> str:
     if isinstance(value, list):
         return ", ".join(str(item) for item in value)
-    return str(value)
-
-
-def render_page_list_item(repo_paths: RepoPaths, page: Path) -> str:
-    metadata, body = load_markdown(page)
-    relative_path = page.relative_to(repo_paths.wiki_root).as_posix()
-    summary = extract_preview_line(body)
-    date_label = datetime.fromtimestamp(page.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-    return (
-        f'<li><a href="/page/{escape(relative_path)}">{escape(str(metadata.get("title") or page.stem))}</a>'
-        f'<div class="result-path">{escape(relative_path)} · {escape(date_label)}</div>'
-        f'<p class="result-summary">{escape(summary)}</p></li>'
-    )
+    text = str(value)
+    if "T" in text and len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+    return text
 
 
 def render_template_label(template: str) -> str:
@@ -544,24 +723,41 @@ def render_health_surface(repo_paths: RepoPaths, report: DoctorReport, inbox_cou
     clippings_note = ""
     if report.clippings_files:
         clippings_note = (
-            f'<p class="status-warn">Found {len(report.clippings_files)} markdown file(s) in <code>Clippings/</code>. '
+            f'<p class="status-warn">{len(report.clippings_files)} markdown file(s) sit in <code>Clippings/</code>. '
             "Retarget Web Clipper to <code>raw/inbox/</code>.</p>"
         )
     index_check = next((check for check in report.checks if check.key == "index-drift"), None)
     runtime_check = next((check for check in report.checks if check.key == "dashboard"), None)
     return f"""
-    <section class="status-card">
-      <p class="eyebrow">Inbox health</p>
-      <h2>Workspace status</h2>
-      <dl class="status-list">
-        <div><dt>Inbox files</dt><dd>{inbox_count}</dd></div>
-        <div><dt>Latest source</dt><dd><code>{escape(report.latest_processed_source or 'none yet')}</code></dd></div>
-        <div><dt>Latest log</dt><dd>{escape(report.latest_log_heading or 'none yet')}</dd></div>
-        <div><dt>Index</dt><dd>{escape(index_check.detail if index_check else 'unknown')}</dd></div>
-        <div><dt>Runtime</dt><dd>{escape(runtime_check.detail if runtime_check else 'unknown')}</dd></div>
-      </dl>
+    <section class="status-section">
+      <header class="section-head">
+        <p class="kicker">workspace status</p>
+        <h2>Health of the pipeline.</h2>
+      </header>
+      <div class="status-grid">
+        <div class="status-cell">
+          <span class="status-label">inbox</span>
+          <span class="status-value">{inbox_count}</span>
+        </div>
+        <div class="status-cell">
+          <span class="status-label">latest source</span>
+          <span class="status-value status-value-mono">{escape(report.latest_processed_source or 'none yet')}</span>
+        </div>
+        <div class="status-cell">
+          <span class="status-label">latest log</span>
+          <span class="status-value">{escape(report.latest_log_heading or 'none yet')}</span>
+        </div>
+        <div class="status-cell">
+          <span class="status-label">index</span>
+          <span class="status-value">{escape(index_check.detail if index_check else 'unknown')}</span>
+        </div>
+        <div class="status-cell">
+          <span class="status-label">runtime</span>
+          <span class="status-value">{escape(runtime_check.detail if runtime_check else 'unknown')}</span>
+        </div>
+      </div>
       {clippings_note}
-      <p class="meta-line">Next step: {escape(report.recommended_next_step)}</p>
+      <p class="status-next">next · {escape(report.recommended_next_step)}</p>
     </section>
     """
 
@@ -573,35 +769,42 @@ def render_latest_ingest(repo_paths: RepoPaths, report: DoctorReport) -> str:
     source_page = next((page for page in entry.touched_pages if page.startswith("sources/")), None)
     related_pages = [page for page in entry.touched_pages if page.startswith("entities/") or page.startswith("concepts/")]
     related_html = "".join(
-        f'<li><a href="/page/{escape(page)}">{escape(page)}</a></li>' for page in related_pages[:6]
-    ) or "<li>No related pages yet.</li>"
+        f'<a class="chip" href="/page/{escape(page)}">{escape(page)}</a>' for page in related_pages[:8]
+    ) or '<span class="chip chip-empty">no related pages yet</span>'
     source_action = ""
     if source_page:
         source_action = f"""
-        <div class="action-row">
-          <a class="action-link" href="/open?kind=wiki&path={escape(source_page)}&target=obsidian">Open source page</a>
-          <a class="action-link action-link-muted" href="/open?kind=raw&path={escape(report.latest_processed_source or '')}&target=finder">Reveal raw source</a>
+        <div class="answer-actions">
+          <a class="primary-btn" href="/open?kind=wiki&path={escape(source_page)}&target=obsidian">
+            <span>Open source</span>
+            <span aria-hidden="true">↗</span>
+          </a>
+          <a class="ghost-btn" href="/open?kind=raw&path={escape(report.latest_processed_source or '')}&target=finder">Reveal raw</a>
         </div>
         """
     summary_intro, summary_points = split_activity_summary(entry.summary)
     summary_html = ""
     if summary_intro:
-        summary_html += f'<p class="meta-line summary-intro">{escape(summary_intro)}</p>'
+        summary_html += f'<p class="ingest-intro">{escape(summary_intro)}</p>'
     if summary_points:
         points_html = "".join(f"<li>{escape(point)}</li>" for point in summary_points)
-        summary_html += f'<ul class="summary-list">{points_html}</ul>'
+        summary_html += f'<ul class="ingest-points">{points_html}</ul>'
     return f"""
-    <section class="split split-tight">
-      <div class="answer-panel ingest-panel">
-        <p class="eyebrow">Latest ingest</p>
+    <section class="ingest-section">
+      <header class="section-head">
+        <p class="kicker">latest ingest</p>
         <h2>{escape(entry.title)}</h2>
-        <p class="meta-line">Raw source: <code>{escape(report.latest_processed_source or 'unknown')}</code></p>
-        {summary_html}
-        {source_action}
-      </div>
-      <div class="status-card touched-panel">
-        <p class="eyebrow">Touched pages</p>
-        <ul class="link-list">{related_html}</ul>
+        <p class="section-meta">raw · <code>{escape(report.latest_processed_source or 'unknown')}</code></p>
+      </header>
+      <div class="ingest-grid">
+        <div class="ingest-body">
+          {summary_html}
+          {source_action}
+        </div>
+        <div class="ingest-side">
+          <p class="kicker">touched</p>
+          <div class="chips">{related_html}</div>
+        </div>
       </div>
     </section>
     """
@@ -641,658 +844,1447 @@ def resolve_open_target(repo_paths: RepoPaths, *, kind: str, path: str) -> Path:
     return target
 
 
+# ---------------------------------------------------------------------------
+# Layout (CSS + shell + JS)
+# ---------------------------------------------------------------------------
+
+_LAYOUT_CSS = r"""
+:root {
+  --ink: #14110d;
+  --ink-soft: #2a2520;
+  --paper: #f6f1e7;
+  --paper-2: #ede4d3;
+  --paper-3: rgba(255, 252, 245, 0.62);
+  --muted: #6f675a;
+  --muted-2: #8a8175;
+  --line: rgba(20, 17, 13, 0.10);
+  --line-strong: rgba(20, 17, 13, 0.18);
+  --accent: #ff5c2b;
+  --accent-press: #e84512;
+  --accent-soft: rgba(255, 92, 43, 0.14);
+  --forest: #295c52;
+  --forest-soft: rgba(41, 92, 82, 0.12);
+  --plum: #6b4ee8;
+  --shadow-card: 0 24px 60px -28px rgba(20, 17, 13, 0.22);
+  --shadow-strong: 0 40px 90px -30px rgba(20, 17, 13, 0.28);
+  --radius-sm: 12px;
+  --radius-md: 18px;
+  --radius-lg: 28px;
+  --radius-xl: 40px;
+  --display-font: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  --body-font: "Inter", "Avenir Next", "Helvetica Neue", system-ui, sans-serif;
+  --mono-font: "JetBrains Mono", "SF Mono", "Menlo", monospace;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body-font);
+  font-size: 16px;
+  line-height: 1.55;
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+}
+
+::selection { background: rgba(255, 92, 43, 0.32); color: var(--ink); }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.ask-shell:focus-within :focus-visible { outline: 0; }
+.ask-input:focus-visible,
+.tag-input-field:focus-visible,
+.search-mini input:focus-visible { outline: 0; }
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.08 0 0 0 0 0.07 0 0 0 0 0.05 0 0 0 0.42 0'/></filter><rect width='200' height='200' filter='url(%23n)'/></svg>");
+  opacity: 0.32;
+  mix-blend-mode: multiply;
+}
+
+a {
+  color: inherit;
+  text-decoration-color: rgba(20, 17, 13, 0.22);
+  text-underline-offset: 0.18em;
+  transition: color 160ms ease, text-decoration-color 160ms ease;
+}
+a:hover { color: var(--accent); text-decoration-color: var(--accent); }
+
+code { font-family: var(--mono-font); font-size: 0.9em; }
+
+.shell {
+  position: relative;
+  z-index: 1;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 28px 32px 96px;
+}
+
+/* ---- header ---- */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(246, 241, 231, 0.78);
+  backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15);
+}
+.topbar::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 1px;
+  background: var(--line);
+  pointer-events: none;
+}
+.topbar-inner {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 14px 32px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.brand {
+  display: flex; align-items: center; gap: 12px;
+  text-decoration: none; color: var(--ink);
+}
+.brand-mark {
+  font-family: var(--display-font);
+  font-size: 1.6rem;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.brand-dot {
+  width: 9px; height: 9px; border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgba(255, 92, 43, 0.16);
+  animation: pulse 2400ms ease-in-out infinite;
+}
+.brand-tag {
+  font-size: 0.78rem;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.topbar-tools { display: flex; align-items: center; gap: 12px; }
+.search-mini {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--paper-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 14px;
+  min-width: 280px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.search-mini:focus-within {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.search-mini input {
+  flex: 1; min-width: 0;
+  border: 0; background: transparent; outline: none;
+  font: inherit; color: var(--ink);
+}
+.search-mini button {
+  border: 0; background: transparent;
+  font-size: 0.78rem; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--muted); cursor: pointer;
+  font-family: var(--mono-font);
+}
+.search-mini button:hover { color: var(--ink); }
+.kbd {
+  font-family: var(--mono-font);
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--paper);
+}
+
+main { padding-top: 36px; display: grid; gap: 56px; }
+
+/* ---- aurora background per stage ---- */
+.stage { position: relative; padding: 12px 0 0; }
+.stage-narrow .hero { max-width: 880px; }
+.aurora {
+  position: absolute; inset: -10% -8% auto -8%;
+  height: 540px; pointer-events: none; z-index: 0;
+  filter: blur(60px) saturate(1.15);
+  opacity: 0.85;
+}
+.aurora-blob {
+  position: absolute; border-radius: 50%; opacity: 0.55;
+  will-change: transform;
+}
+.aurora-blob-1 {
+  width: 520px; height: 520px;
+  background: radial-gradient(circle, rgba(255, 92, 43, 0.55), transparent 60%);
+  top: -120px; left: -40px;
+  animation: drift1 22s ease-in-out infinite alternate;
+}
+.aurora-blob-2 {
+  width: 460px; height: 460px;
+  background: radial-gradient(circle, rgba(41, 92, 82, 0.4), transparent 60%);
+  top: -60px; right: -60px;
+  animation: drift2 26s ease-in-out infinite alternate;
+}
+.aurora-blob-3 {
+  width: 380px; height: 380px;
+  background: radial-gradient(circle, rgba(107, 78, 232, 0.3), transparent 60%);
+  top: 80px; left: 38%;
+  animation: drift3 30s ease-in-out infinite alternate;
+}
+
+@keyframes drift1 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(60px, 40px) scale(1.08); }
+}
+@keyframes drift2 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-50px, 60px) scale(1.05); }
+}
+@keyframes drift3 {
+  0% { transform: translate(-20px, 0) scale(1); }
+  100% { transform: translate(40px, -30px) scale(1.1); }
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(255, 92, 43, 0.18); }
+  50% { box-shadow: 0 0 0 8px rgba(255, 92, 43, 0.04); }
+}
+
+/* ---- hero ---- */
+.hero {
+  position: relative;
+  z-index: 1;
+  max-width: 1100px;
+  padding: 36px 0 48px;
+  animation: rise 540ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.kicker {
+  margin: 0 0 20px;
+  font-family: var(--mono-font);
+  font-size: 0.74rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.kicker-spaced { margin-top: 22px; }
+.display {
+  margin: 0 0 16px;
+  font-family: var(--display-font);
+  font-weight: 400;
+  letter-spacing: -0.045em;
+  line-height: 0.92;
+  font-size: clamp(2.6rem, 8.4vw, 7rem);
+  color: var(--ink);
+}
+.display-line { display: inline; }
+.display-accent { color: var(--accent); }
+.subhead {
+  font-family: var(--display-font);
+  font-size: clamp(1.2rem, 2.2vw, 1.7rem);
+  line-height: 1.3;
+  color: var(--ink-soft);
+  max-width: 52ch;
+  margin: 0 0 22px;
+  font-style: italic;
+}
+.subhead-muted {
+  color: var(--muted);
+  margin: -16px 0 0;
+  font-size: 1rem;
+  font-style: normal;
+}
+
+/* ---- rotor word ---- */
+.rotor {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  position: relative;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  font-style: normal;
+  color: var(--accent);
+  transition: background 320ms ease;
+}
+.rotor-word {
+  display: inline-block;
+  transition: opacity 280ms ease, transform 280ms ease;
+}
+.rotor-word.rotor-out {
+  opacity: 0; transform: translateY(-4px);
+}
+.rotor-caret {
+  display: inline-block;
+  font-family: var(--mono-font);
+  color: var(--accent);
+  animation: blink 1100ms steps(2) infinite;
+  font-size: 0.78em;
+}
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.1; } }
+
+/* ---- ask form ---- */
+.ask {
+  display: grid; gap: 18px;
+  margin-top: 14px;
+  max-width: 880px;
+}
+.ask-shell {
+  position: relative;
+  display: flex; align-items: center; gap: 14px;
+  background: rgba(255, 252, 245, 0.92);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  padding: 12px 12px 12px 24px;
+  box-shadow: var(--shadow-card);
+  transition: border-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+}
+.ask-shell:focus-within {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-card);
+  transform: translateY(-1px);
+}
+.ask-icon {
+  font-family: var(--display-font);
+  font-size: 1.4rem;
+  color: var(--accent);
+  line-height: 1;
+}
+.ask-input {
+  flex: 1; min-width: 0;
+  border: 0; outline: none; background: transparent;
+  font: inherit;
+  font-size: 1.18rem;
+  padding: 14px 8px;
+  caret-color: var(--accent);
+  color: var(--ink);
+}
+.ask-input::placeholder { color: var(--muted-2); }
+.ask-submit {
+  display: inline-flex; align-items: center; gap: 10px;
+  border: 0;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 999px;
+  padding: 14px 22px;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  box-shadow: 0 14px 30px -16px rgba(20, 17, 13, 0.4);
+}
+.ask-submit:hover { background: var(--accent); transform: translateY(-1px); }
+.ask-submit:active { transform: translateY(0) scale(0.98); }
+.ask-submit-kbd {
+  font-family: var(--mono-font);
+  font-size: 0.78rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.14);
+}
+form[data-ask-form][data-loading] .ask-submit {
+  background: var(--accent);
+  pointer-events: none;
+}
+form[data-ask-form][data-loading] .ask-submit-label {
+  position: relative; padding-right: 18px;
+}
+form[data-ask-form][data-loading] .ask-submit-label::after {
+  content: "";
+  position: absolute; right: 0; top: 50%;
+  width: 12px; height: 12px;
+  margin-top: -6px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: white;
+  animation: spin 700ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- ask meta (scope + segmented templates) ---- */
+.ask-meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.tag-input {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  background: var(--paper-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  min-height: 50px;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+.tag-input:focus-within { border-color: var(--ink); background: rgba(255, 252, 245, 0.95); }
+.tag-input-prefix {
+  font-family: var(--mono-font);
+  font-size: 0.74rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-right: 4px;
+}
+.tag-pills { display: contents; }
+.tag-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 999px;
+  padding: 4px 4px 4px 12px;
+  font-size: 0.84rem;
+  animation: pop 280ms cubic-bezier(0.2, 0.9, 0.3, 1.4) both;
+}
+.tag-pill button {
+  width: 22px; height: 22px;
+  border: 0; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--paper);
+  font-size: 0.92rem; line-height: 1;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+.tag-pill button:hover { background: var(--accent); }
+.tag-input-field {
+  flex: 1; min-width: 100px;
+  border: 0; outline: none; background: transparent;
+  font: inherit; font-size: 0.92rem;
+  color: var(--ink);
+  padding: 4px 0;
+}
+.tag-input-field::placeholder { color: var(--muted-2); }
+@keyframes pop {
+  0% { transform: scale(0.8); opacity: 0; }
+  60% { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.seg {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  background: var(--paper-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 6px;
+}
+.seg-option {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 0.88rem;
+  color: var(--muted);
+  transition: color 160ms ease, background 160ms ease, transform 120ms ease;
+}
+.seg-option input { position: absolute; opacity: 0; pointer-events: none; }
+.seg-option:hover { color: var(--ink); }
+.seg-option:has(input:checked) {
+  background: var(--ink);
+  color: var(--paper);
+  transform: translateY(-1px);
+}
+.seg-option:has(input:checked) .seg-glyph { color: var(--accent); }
+.seg-glyph {
+  font-family: var(--display-font);
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+/* ---- ticker ---- */
+.ticker {
+  position: relative; z-index: 1;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  margin-top: 8px;
+  padding: 14px 18px;
+  border-radius: 999px;
+  background: rgba(255, 252, 245, 0.7);
+  border: 1px solid var(--line);
+  font-size: 0.86rem;
+  color: var(--muted);
+  backdrop-filter: blur(10px);
+  animation: rise 600ms ease 120ms both;
+}
+.ticker-chip {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(20, 17, 13, 0.04);
+}
+.ticker-chip strong {
+  font-family: var(--display-font);
+  font-size: 1.1rem;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+}
+.ticker-chip-active { background: var(--accent-soft); color: var(--ink); }
+.ticker-chip-active strong { color: var(--accent); }
+.ticker-chip-quiet { background: rgba(20, 17, 13, 0.04); }
+.ticker-divider {
+  width: 1px; height: 18px;
+  background: var(--line-strong);
+  margin: 0 6px;
+}
+.ticker-meta { font-family: var(--mono-font); font-size: 0.78rem; }
+
+/* ---- section heads ---- */
+.section-head {
+  margin: 0 0 22px;
+  display: grid; gap: 4px;
+}
+.section-head .kicker { margin: 0; }
+.section-head h2 {
+  margin: 0;
+  font-family: var(--display-font);
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  letter-spacing: -0.025em;
+  font-weight: 400;
+}
+.section-meta {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+/* ---- recent rail ---- */
+.rail-section { padding-top: 8px; }
+.rail {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(280px, 320px);
+  gap: 16px;
+  overflow-x: auto;
+  padding: 8px 0 18px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+}
+.rail::-webkit-scrollbar { height: 8px; }
+.rail::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
+.rail-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-decoration: none;
+  color: var(--ink);
+  padding: 22px 22px 20px;
+  background: rgba(255, 252, 245, 0.78);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  scroll-snap-align: start;
+  min-height: 220px;
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.3, 1), box-shadow 220ms ease, border-color 220ms ease;
+  animation: rise 480ms ease both;
+  overflow: hidden;
+}
+.rail-card .rail-card-arrow { margin-top: auto; }
+.rail-card::after {
+  content: "";
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), transparent 80%);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 280ms ease;
+}
+.rail-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--ink);
+  box-shadow: var(--shadow-strong);
+  color: var(--ink);
+}
+.rail-card:hover::after { transform: scaleX(1); }
+.rail-card-meta {
+  display: flex; justify-content: space-between; align-items: center;
+  font-family: var(--mono-font);
+  font-size: 0.74rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.rail-card-section { color: var(--accent); }
+.rail-title {
+  margin: 0;
+  font-family: var(--display-font);
+  font-size: 1.45rem;
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+.rail-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.94rem;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.rail-card-arrow {
+  font-family: var(--mono-font);
+  align-self: end;
+  color: var(--accent);
+  font-size: 1.1rem;
+  transform: translateX(-4px);
+  opacity: 0.5;
+  transition: transform 240ms ease, opacity 240ms ease;
+}
+.rail-card:hover .rail-card-arrow { transform: translateX(0); opacity: 1; }
+
+/* ---- search results ---- */
+.results-section { padding: 0 0 8px; }
+.result-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.result {
+  padding: 18px 20px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  transition: background 160ms ease, transform 200ms ease, border-color 160ms ease;
+  animation: rise 420ms ease both;
+}
+.result:hover {
+  background: rgba(255, 252, 245, 0.86);
+  border-color: var(--line);
+  transform: translateX(2px);
+}
+.result-meta {
+  display: flex; gap: 12px; align-items: center;
+  font-family: var(--mono-font);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.result-section { color: var(--accent); }
+.result-title {
+  font-family: var(--display-font);
+  font-size: 1.45rem;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+  display: block;
+  margin-bottom: 4px;
+}
+.result-summary {
+  margin: 0; color: var(--muted); max-width: 70ch;
+}
+
+/* ---- ask result page ---- */
+.saved-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(20, 17, 13, 0.05);
+  color: var(--muted);
+  font-family: var(--mono-font);
+  font-size: 0.8rem;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+.saved-link:hover { color: var(--ink); border-color: var(--line-strong); background: rgba(255,252,245,0.9); }
+.answer-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 0; }
+.primary-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--ink);
+  color: var(--paper);
+  text-decoration: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 20px;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  box-shadow: 0 16px 30px -16px rgba(20, 17, 13, 0.4);
+}
+.primary-btn:hover { background: var(--accent); transform: translateY(-1px); color: var(--paper); }
+.ghost-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: transparent;
+  color: var(--ink);
+  text-decoration: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 11px 18px;
+  font: inherit;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.ghost-btn:hover { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+.answer-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+  gap: 36px;
+  align-items: start;
+}
+.answer-body {
+  font-family: var(--display-font);
+  font-size: 1.18rem;
+  line-height: 1.65;
+  color: var(--ink);
+  padding: 0 8px;
+}
+.answer-side {
+  position: sticky; top: 100px;
+  padding: 22px;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 252, 245, 0.78);
+  border: 1px solid var(--line);
+}
+.answer-question {
+  font-family: var(--display-font);
+  font-style: italic;
+  color: var(--ink-soft);
+  margin: 6px 0 0;
+}
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(20, 17, 13, 0.06);
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-size: 0.86rem;
+  font-family: var(--mono-font);
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+.chip:hover { background: var(--ink); color: var(--paper); transform: translateY(-1px); }
+.chip-empty { color: var(--muted); background: transparent; border: 1px dashed var(--line-strong); }
+
+.ask-followup {
+  padding: 28px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+/* ---- markdown body ---- */
+.markdown-body {
+  font-family: var(--display-font);
+  font-size: 1.14rem;
+  line-height: 1.7;
+  padding: 0 4px;
+}
+.markdown-body p { margin: 0 0 1em; }
+.markdown-body ul, .markdown-body ol { padding-left: 1.4em; margin: 0 0 1.2em; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  font-family: var(--display-font);
+  letter-spacing: -0.02em;
+  margin: 1.6em 0 0.5em;
+  font-weight: 400;
+}
+.markdown-body h1 { font-size: 1.8rem; }
+.markdown-body h2 { font-size: 1.45rem; }
+.markdown-body h3 { font-size: 1.2rem; }
+.markdown-body blockquote {
+  margin: 1.2em 0;
+  padding: 6px 0 6px 18px;
+  border-left: 2px solid var(--accent);
+  color: var(--muted);
+  font-style: italic;
+}
+.markdown-body code {
+  background: rgba(20, 17, 13, 0.06);
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.88em;
+  font-family: var(--mono-font);
+}
+.markdown-body pre {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 18px 20px;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  font-family: var(--mono-font);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+.markdown-body pre code { background: transparent; padding: 0; color: inherit; }
+.markdown-body a { color: var(--accent); }
+
+/* ---- page view ---- */
+.meta-pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 22px; }
+.meta-pill {
+  display: inline-flex; gap: 6px; align-items: baseline;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(20, 17, 13, 0.05);
+  font-size: 0.84rem;
+}
+.meta-pill-key {
+  font-family: var(--mono-font);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.page-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 1fr);
+  gap: 36px;
+  align-items: start;
+}
+.page-side {
+  position: sticky; top: 100px;
+  padding: 22px;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 252, 245, 0.78);
+  border: 1px solid var(--line);
+}
+.link-list {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; gap: 8px;
+  font-family: var(--mono-font);
+  font-size: 0.88rem;
+}
+.link-list li.empty { color: var(--muted); font-style: italic; }
+.link-list a { text-decoration: none; }
+.link-list a:hover { color: var(--accent); }
+
+/* ---- ingest section ---- */
+.ingest-section {
+  padding: 28px;
+  border-radius: var(--radius-xl);
+  background: linear-gradient(140deg, rgba(255, 252, 245, 0.92), rgba(237, 228, 211, 0.6));
+  border: 1px solid var(--line);
+  position: relative;
+  overflow: hidden;
+}
+.ingest-section::before {
+  content: "";
+  position: absolute; right: -120px; bottom: -160px;
+  width: 320px; height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-soft), transparent 70%);
+  pointer-events: none;
+}
+.ingest-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 28px;
+  position: relative;
+}
+.ingest-intro { margin: 0 0 12px; color: var(--ink-soft); font-size: 1.04rem; }
+.ingest-points {
+  list-style: none; padding: 0; margin: 0 0 18px;
+  display: grid; gap: 10px;
+  color: var(--ink-soft);
+}
+.ingest-points li {
+  position: relative;
+  padding-left: 22px;
+}
+.ingest-points li::before {
+  content: "✦";
+  position: absolute; left: 0;
+  color: var(--accent);
+  font-family: var(--display-font);
+}
+.ingest-side .kicker { margin: 0 0 10px; }
+
+/* ---- status ---- */
+.status-section {
+  padding: 28px 30px;
+  border-radius: var(--radius-xl);
+  background: linear-gradient(160deg, rgba(255, 252, 245, 0.92), rgba(237, 228, 211, 0.55));
+  border: 1px solid var(--line);
+  position: relative;
+  overflow: hidden;
+}
+.status-section::before {
+  content: "";
+  position: absolute;
+  left: -120px; top: -120px;
+  width: 280px; height: 280px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--forest-soft), transparent 70%);
+  pointer-events: none;
+}
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin: 0 0 18px;
+}
+.status-cell {
+  padding: 16px 18px;
+  border-radius: var(--radius-md);
+  background: rgba(20, 17, 13, 0.04);
+  display: grid; gap: 4px;
+}
+.status-label {
+  font-family: var(--mono-font);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.status-value {
+  font-family: var(--display-font);
+  font-size: 1.1rem;
+  letter-spacing: -0.01em;
+  word-break: break-word;
+}
+.status-value-mono {
+  font-family: var(--mono-font);
+  font-size: 0.92rem;
+}
+.status-warn {
+  margin: 12px 0 0;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  background: rgba(217, 122, 64, 0.12);
+  color: #7d4a29;
+}
+.status-next {
+  margin: 0;
+  font-family: var(--mono-font);
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+/* ---- capture FAB + dialog ---- */
+.fab {
+  position: fixed; right: 28px; bottom: 28px;
+  z-index: 60;
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 14px 20px;
+  border: 0; border-radius: 999px;
+  background: var(--ink); color: var(--paper);
+  font: inherit; font-size: 0.94rem; font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 24px 50px -16px rgba(20, 17, 13, 0.5);
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.3, 1.2), background 160ms ease;
+}
+.fab:hover { transform: translateY(-2px) scale(1.02); background: var(--accent); }
+body[data-capture-open] .fab {
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+.fab-glyph {
+  font-family: var(--display-font);
+  font-size: 1.1rem;
+  color: var(--accent);
+}
+.fab:hover .fab-glyph { color: var(--paper); }
+.fab-kbd {
+  font-family: var(--mono-font);
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.14);
+  color: rgba(255,255,255,0.85);
+}
+
+.capture-dialog {
+  width: min(560px, calc(100% - 32px));
+  max-height: 85vh;
+  margin: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xl);
+  background: var(--paper);
+  box-shadow: var(--shadow-strong);
+  color: var(--ink);
+  overflow: hidden;
+}
+.capture-dialog::backdrop {
+  background: rgba(20, 17, 13, 0.4);
+  backdrop-filter: blur(6px);
+}
+.capture-dialog[open] { animation: dialogIn 320ms cubic-bezier(0.2, 0.7, 0.2, 1.1); }
+@keyframes dialogIn {
+  from { transform: translateY(20px) scale(0.97); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.capture {
+  padding: 28px;
+  display: grid; gap: 18px;
+  background: linear-gradient(160deg, rgba(255, 252, 245, 1), rgba(237, 228, 211, 0.4));
+}
+.capture-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 16px;
+}
+.capture-head h2 {
+  font-family: var(--display-font);
+  font-size: 1.6rem;
+  letter-spacing: -0.02em;
+  margin: 0;
+  font-weight: 400;
+}
+.capture textarea {
+  width: 100%;
+  min-height: 200px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.86);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  font: inherit;
+  font-size: 0.96rem;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.capture textarea:focus { border-color: var(--ink); box-shadow: 0 0 0 3px var(--accent-soft); }
+.capture-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.capture-fields input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.86);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  font: inherit;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.capture-fields input:focus { border-color: var(--ink); box-shadow: 0 0 0 3px var(--accent-soft); }
+.capture-actions {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap;
+}
+.capture-hint { margin: 0; color: var(--muted); font-size: 0.86rem; font-family: var(--mono-font); }
+.capture-status {
+  margin: 0; min-height: 1.4em;
+  font-size: 0.92rem; color: var(--muted);
+}
+.capture-status[data-state="error"] { color: var(--accent-press); }
+.capture-status[data-state="working"] { color: var(--forest); }
+.capture-status[data-state="ok"] { color: var(--forest); }
+.capture[data-loading] .primary-btn {
+  pointer-events: none;
+  background: var(--accent);
+}
+
+/* ---- thinking overlay ---- */
+.thinking {
+  position: fixed; inset: 0;
+  display: none;
+  z-index: 80;
+  background: rgba(20, 17, 13, 0.8);
+  backdrop-filter: blur(14px);
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 22px;
+  color: var(--paper);
+  font-family: var(--display-font);
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+  letter-spacing: -0.02em;
+  animation: fadeIn 240ms ease;
+}
+.thinking[data-on] { display: flex; }
+.thinking-dots {
+  display: inline-flex; gap: 8px;
+}
+.thinking-dots span {
+  width: 12px; height: 12px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: bounce 1100ms cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+.thinking-dots span:nth-child(2) { animation-delay: 140ms; background: var(--paper); }
+.thinking-dots span:nth-child(3) { animation-delay: 280ms; background: var(--forest); }
+.thinking-text {
+  display: inline-flex; align-items: baseline; gap: 14px;
+  text-align: center;
+  max-width: 30ch;
+}
+.thinking-progress {
+  width: min(360px, 70vw);
+  height: 2px;
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.thinking-progress span {
+  display: block; height: 100%;
+  width: 22%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: scan 1400ms linear infinite;
+}
+@keyframes bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.6; }
+  40% { transform: translateY(-10px); opacity: 1; }
+}
+@keyframes scan {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(500%); }
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---- footer hints ---- */
+.foot-hints {
+  margin-top: 28px;
+  padding: 18px 0 0;
+  border-top: 1px solid var(--line);
+  display: flex; flex-wrap: wrap; gap: 16px;
+  font-family: var(--mono-font);
+  font-size: 0.78rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+/* ---- animations ---- */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---- responsive ---- */
+@media (max-width: 960px) {
+  .topbar-inner { gap: 14px; flex-wrap: wrap; }
+  .search-mini { min-width: 220px; flex: 1; }
+  .ask-meta { grid-template-columns: 1fr; }
+  .answer-section, .page-section, .ingest-grid {
+    grid-template-columns: 1fr;
+  }
+  .answer-side, .page-side { position: static; }
+  .display { font-size: clamp(2.4rem, 11vw, 5rem); }
+}
+@media (max-width: 600px) {
+  .shell { padding: 20px 18px 96px; }
+  .topbar-inner { padding: 12px 18px 14px; }
+  .ask-shell { padding: 8px 8px 8px 16px; }
+  .ask-input { font-size: 1.04rem; }
+  .ask-submit { padding: 12px 16px; }
+  .fab { right: 14px; bottom: 14px; padding: 12px 16px; }
+  .fab-kbd { display: none; }
+  .capture-fields { grid-template-columns: 1fr; }
+}
+"""
+
+_LAYOUT_JS = r"""
+const PROMPTS = __PROMPTS__;
+
+function rotateHero() {
+  const word = document.querySelector("[data-rotor-word]");
+  if (!word) return;
+  const input = document.getElementById("ask-input");
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduced) return;
+  let idx = 0;
+  setInterval(() => {
+    idx = (idx + 1) % PROMPTS.length;
+    word.classList.add("rotor-out");
+    setTimeout(() => {
+      word.textContent = PROMPTS[idx];
+      word.classList.remove("rotor-out");
+      if (input && !input.value && document.activeElement !== input) {
+        input.placeholder = `What does the wiki know about ${PROMPTS[idx]}?`;
+      }
+    }, 280);
+  }, 2800);
+}
+
+function bindTagInput() {
+  document.querySelectorAll("[data-tag-input]").forEach((wrap) => {
+    const field = wrap.querySelector("[data-tag-field]");
+    const hidden = wrap.querySelector("[data-tag-hidden]");
+    const pillsHost = wrap.querySelector("[data-tag-pills]");
+    if (!field || !hidden || !pillsHost) return;
+    let tags = (hidden.value || "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    const render = () => {
+      pillsHost.innerHTML = "";
+      tags.forEach((t, i) => {
+        const pill = document.createElement("span");
+        pill.className = "tag-pill";
+        const label = document.createElement("span");
+        label.textContent = t;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.setAttribute("aria-label", `Remove ${t}`);
+        btn.textContent = "×";
+        btn.addEventListener("click", () => {
+          tags.splice(i, 1);
+          sync();
+        });
+        pill.appendChild(label);
+        pill.appendChild(btn);
+        pillsHost.appendChild(pill);
+      });
+      hidden.value = tags.join(",");
+    };
+    const sync = () => render();
+
+    const commit = () => {
+      const raw = field.value.trim().replace(/,$/, "").trim();
+      if (raw && !tags.includes(raw)) tags.push(raw);
+      field.value = "";
+      sync();
+    };
+
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === "," || event.key === "Tab") {
+        if (field.value.trim()) {
+          event.preventDefault();
+          commit();
+        }
+      } else if (event.key === "Backspace" && !field.value && tags.length) {
+        tags.pop();
+        sync();
+      }
+    });
+    field.addEventListener("blur", () => {
+      if (field.value.trim()) commit();
+    });
+
+    sync();
+  });
+}
+
+function bindAskLoading() {
+  const overlay = document.querySelector("[data-thinking]");
+  const messageEl = overlay && overlay.querySelector("[data-thinking-message]");
+  const messages = [
+    "Searching the wiki",
+    "Pulling relevant pages",
+    "Reading carefully",
+    "Synthesizing",
+    "Drafting your saved page",
+  ];
+
+  document.querySelectorAll("[data-ask-form]").forEach((form) => {
+    form.addEventListener("submit", () => {
+      form.dataset.loading = "true";
+      if (!overlay || !messageEl) return;
+      overlay.dataset.on = "true";
+      let i = 0;
+      messageEl.textContent = messages[0];
+      const tick = () => {
+        i = (i + 1) % messages.length;
+        messageEl.style.opacity = "0";
+        setTimeout(() => {
+          messageEl.textContent = messages[i];
+          messageEl.style.opacity = "1";
+        }, 220);
+      };
+      const timer = setInterval(tick, 2200);
+      window.addEventListener("pagehide", () => clearInterval(timer), { once: true });
+    });
+  });
+}
+
+function bindCapture() {
+  const dialog = document.querySelector("[data-capture-dialog]");
+  const trigger = document.querySelector("[data-capture-trigger]");
+  const closeBtn = document.querySelector("[data-capture-close]");
+  if (!dialog) return;
+
+  const open = () => {
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "true");
+    setTimeout(() => {
+      const ta = dialog.querySelector("textarea");
+      if (ta) ta.focus();
+    }, 30);
+  };
+  const close = () => {
+    if (typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+  };
+
+  const setBodyState = (isOpen) => {
+    document.body.toggleAttribute("data-capture-open", isOpen);
+  };
+  if (trigger) trigger.addEventListener("click", () => { open(); setBodyState(true); });
+  if (closeBtn) closeBtn.addEventListener("click", () => { close(); setBodyState(false); });
+  dialog.addEventListener("close", () => setBodyState(false));
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) { close(); setBodyState(false); }
+  });
+
+  const form = dialog.querySelector("[data-capture-form]");
+  if (!form) return;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const status = form.querySelector("[data-capture-status]");
+    const button = form.querySelector('button[type="submit"]');
+    const label = form.querySelector("[data-capture-label]");
+    const text = form.querySelector('textarea[name="text"]');
+    const title = form.querySelector('input[name="title"]');
+    const url = form.querySelector('input[name="source_url"]');
+    if (!text) return;
+    form.dataset.loading = "true";
+    if (status) {
+      status.dataset.state = "working";
+      status.textContent = "Capturing and processing…";
+    }
+    if (label) label.textContent = "Working…";
+    if (button) button.disabled = true;
+    try {
+      const response = await fetch("/capture", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: text.value,
+          title: title ? title.value : "",
+          source_url: url ? url.value : "",
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.message || "Could not capture the note.");
+      if (payload.redirect) {
+        window.location.assign(payload.redirect);
+        return;
+      }
+      form.reset();
+      if (status) {
+        status.dataset.state = "ok";
+        status.textContent = payload.message || "Captured.";
+      }
+    } catch (error) {
+      if (status) {
+        status.dataset.state = "error";
+        status.textContent = error instanceof Error ? error.message : "Could not capture the note.";
+      }
+    } finally {
+      delete form.dataset.loading;
+      if (label) label.textContent = "Capture & process";
+      if (button) button.disabled = false;
+    }
+  });
+}
+
+function bindShortcuts() {
+  document.addEventListener("keydown", (event) => {
+    const target = event.target;
+    const isTyping = target instanceof HTMLElement && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+
+    if (event.key === "/" && !isTyping) {
+      const ask = document.getElementById("ask-input");
+      if (ask) {
+        event.preventDefault();
+        ask.focus();
+        ask.select();
+      }
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      const trigger = document.querySelector("[data-capture-trigger]");
+      if (trigger) trigger.click();
+    }
+    if (event.key === "Escape") {
+      const overlay = document.querySelector("[data-thinking]");
+      if (overlay && overlay.dataset.on) {
+        delete overlay.dataset.on;
+      }
+    }
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  rotateHero();
+  bindTagInput();
+  bindAskLoading();
+  bindCapture();
+  bindShortcuts();
+});
+"""
+
+
+def _layout_js() -> str:
+    return _LAYOUT_JS.replace("__PROMPTS__", json.dumps(list(EXAMPLE_PROMPTS)))
+
+
 def render_layout(title: str, body: str, *, q: str = "") -> str:
+    safe_title = escape(title)
+    search_value = escape(q)
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{escape(title)} · oamc</title>
-  <style>
-    :root {{
-      --bg: #f5f1ea;
-      --bg-wash: rgba(50, 89, 74, 0.08);
-      --panel: rgba(255, 251, 245, 0.78);
-      --panel-strong: rgba(255, 251, 245, 0.94);
-      --panel-soft: rgba(255, 251, 245, 0.56);
-      --text: #191713;
-      --muted: #6f675d;
-      --border: rgba(54, 45, 34, 0.10);
-      --accent: #295c52;
-      --accent-soft: rgba(41, 92, 82, 0.12);
-      --warm-soft: rgba(186, 150, 103, 0.09);
-      --shadow: 0 16px 40px rgba(31, 25, 20, 0.06);
-      --shadow-strong: 0 22px 60px rgba(31, 25, 20, 0.08);
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: {BODY_FONT};
-      line-height: 1.55;
-      min-height: 100vh;
-      position: relative;
-    }}
-    body::before {{
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      background:
-        radial-gradient(circle at top left, var(--bg-wash), transparent 34%),
-        radial-gradient(circle at 85% 10%, rgba(186, 150, 103, 0.08), transparent 26%);
-      opacity: 1;
-    }}
-    body::after {{
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      background: linear-gradient(180deg, rgba(255,255,255,0.16), transparent 28%);
-      opacity: 0.9;
-    }}
-    a {{
-      color: inherit;
-      text-decoration-color: rgba(41, 92, 82, 0.3);
-      text-underline-offset: 0.18em;
-      transition: color 180ms ease, text-decoration-color 180ms ease;
-    }}
-    a:hover {{
-      color: var(--accent);
-      text-decoration-color: rgba(41, 92, 82, 0.5);
-    }}
-    code {{ font-family: "SF Mono", "JetBrains Mono", monospace; font-size: 0.92em; }}
-    .shell {{
-      max-width: 1240px;
-      margin: 0 auto;
-      padding: 30px 28px 64px;
-      position: relative;
-      z-index: 1;
-    }}
-    header {{
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 24px;
-      padding: 0 0 28px;
-      border-bottom: 1px solid var(--border);
-    }}
-    .brand {{
-      text-decoration: none;
-    }}
-    .brand-mark {{
-      display: block;
-      font-family: {DISPLAY_FONT};
-      font-size: 2rem;
-      letter-spacing: -0.03em;
-    }}
-    .brand-note {{
-      display: block;
-      color: var(--muted);
-      font-size: 0.95rem;
-    }}
-    header form {{
-      display: flex;
-      gap: 10px;
-      min-width: min(460px, 100%);
-    }}
-    header input[type="search"] {{
-      flex: 1;
-      border: 1px solid var(--border);
-      background: var(--panel-strong);
-      color: var(--text);
-      border-radius: 999px;
-      padding: 13px 18px;
-      font: inherit;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.45);
-    }}
-    button {{
-      border: 0;
-      border-radius: 999px;
-      background: var(--text);
-      color: white;
-      padding: 12px 18px;
-      font: inherit;
-      cursor: pointer;
-      transition: transform 160ms ease, opacity 160ms ease, background 160ms ease;
-    }}
-    button:hover {{
-      transform: translateY(-1px);
-      background: var(--accent);
-    }}
-    main {{
-      padding-top: 34px;
-      display: grid;
-      gap: 34px;
-    }}
-    .hero-stage {{
-      position: relative;
-      padding: 8px 0 6px;
-      animation: rise-in 420ms ease both;
-    }}
-    .hero-stage::before {{
-      content: "";
-      position: absolute;
-      inset: 0;
-      border-top: 1px solid rgba(41, 92, 82, 0.14);
-      background:
-        linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0)),
-        radial-gradient(circle at 12% 18%, rgba(41, 92, 82, 0.10), transparent 26%);
-      border-radius: 32px;
-      z-index: -1;
-    }}
-    .hero-grid {{
-      display: grid;
-      grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.85fr);
-      gap: 30px;
-      align-items: stretch;
-    }}
-    .hero {{
-      max-width: 760px;
-      padding: 18px 0 8px;
-    }}
-    .hero h1, article h1, section h1 {{
-      margin: 0 0 12px;
-      font-family: {DISPLAY_FONT};
-      font-size: clamp(2.2rem, 4vw, 4.2rem);
-      line-height: 0.95;
-      letter-spacing: -0.04em;
-      max-width: 11ch;
-    }}
-    .hero-note {{
-      display: grid;
-      align-content: end;
-      gap: 10px;
-      padding: 22px 24px;
-      border-radius: 28px;
-      border: 1px solid var(--border);
-      background: linear-gradient(180deg, rgba(255,251,245,0.88), rgba(255,251,245,0.62));
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(14px);
-    }}
-    h2 {{
-      font-family: {DISPLAY_FONT};
-      font-size: 1.5rem;
-      margin: 0 0 10px;
-      letter-spacing: -0.02em;
-    }}
-    .eyebrow {{
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      font-size: 0.75rem;
-      margin: 0 0 10px;
-    }}
-    .lede, .meta-line {{
-      color: var(--muted);
-      max-width: 70ch;
-    }}
-    .lede {{
-      font-size: 1.06rem;
-      max-width: 44ch;
-      margin: 0;
-    }}
-    .editorial-band {{
-      display: grid;
-      grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.9fr);
-      gap: 20px;
-      align-items: start;
-      animation: rise-in 520ms ease both;
-    }}
-    .stats-panel {{
-      padding-top: 8px;
-    }}
-    .stats {{
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-    }}
-    .ask-panel,
-    .answer-panel,
-    .capture-panel,
-    .stat {{
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 26px;
-      padding: 22px;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(14px);
-    }}
-    .ask-panel-compact {{
-      padding: 24px 24px 22px;
-    }}
-    .capture-panel-compact {{
-      padding: 24px;
-      animation: rise-in 580ms ease both;
-    }}
-    .panel-heading {{
-      display: flex;
-      align-items: end;
-      justify-content: space-between;
-      gap: 16px;
-    }}
-    .panel-heading-tight {{
-      margin-bottom: 4px;
-    }}
-    .template-note {{
-      max-width: 24ch;
-      margin: 0;
-      color: var(--muted);
-      font-size: 0.92rem;
-      line-height: 1.45;
-    }}
-    .ask-form {{
-      display: grid;
-      gap: 14px;
-      min-width: 0;
-      margin-top: 18px;
-    }}
-    .capture-form {{
-      display: grid;
-      gap: 14px;
-      min-width: 0;
-      margin-top: 18px;
-    }}
-    .ask-form input[type="search"],
-    .ask-form input[type="text"],
-    .ask-form select,
-    .capture-form input[type="text"],
-    .capture-form input[type="url"],
-    .capture-form textarea {{
-      width: 100%;
-      border: 1px solid var(--border);
-      background: rgba(255,255,255,0.74);
-      color: var(--text);
-      border-radius: 16px;
-      padding: 13px 16px;
-      font: inherit;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
-    }}
-    .capture-form textarea {{
-      min-height: 180px;
-      resize: vertical;
-      line-height: 1.55;
-    }}
-    .ask-controls {{
-      display: grid;
-      grid-template-columns: minmax(0, 1.2fr) 180px auto;
-      gap: 12px;
-      align-items: center;
-    }}
-    .capture-controls {{
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-      gap: 12px;
-      align-items: center;
-    }}
-    .helper {{
-      color: var(--muted);
-      margin: 10px 0 0;
-      max-width: 56ch;
-    }}
-    .capture-status {{
-      min-height: 1.5em;
-      margin: 8px 0 0;
-      color: var(--muted);
-    }}
-    .capture-status[data-state="error"] {{
-      color: #8a3e2d;
-    }}
-    .capture-status[data-state="working"] {{
-      color: var(--accent);
-    }}
-    .stat-label {{
-      color: var(--muted);
-      font-size: 0.78rem;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-    }}
-    .stat-value {{
-      margin-top: 10px;
-      font-family: {DISPLAY_FONT};
-      font-size: clamp(2rem, 3vw, 2.8rem);
-      letter-spacing: -0.04em;
-    }}
-    .split {{
-      display: grid;
-      grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.95fr);
-      gap: 24px;
-    }}
-    .split-tight {{
-      gap: 20px;
-    }}
-    .section-panel {{
-      padding: 4px 0;
-    }}
-    .page-list, .result-list, .link-list {{
-      list-style: none;
-      padding: 0;
-      margin: 0;
-    }}
-    .page-list li, .result {{
-      padding: 18px 0 20px;
-      border-top: 1px solid var(--border);
-      transition: transform 180ms ease, border-color 180ms ease;
-    }}
-    .page-list li:hover, .result:hover {{
-      transform: translateX(4px);
-      border-color: rgba(41, 92, 82, 0.2);
-    }}
-    .page {{
-      max-width: 760px;
-      background: var(--panel-strong);
-      border: 1px solid var(--border);
-      border-radius: 30px;
-      padding: 30px 32px 34px;
-      box-shadow: var(--shadow-strong);
-    }}
-    .result-title, .page-list a {{
-      font-size: 1.08rem;
-      font-weight: 600;
-      text-decoration: none;
-    }}
-    .result-path {{
-      color: var(--muted);
-      font-size: 0.9rem;
-      margin-top: 4px;
-    }}
-    .result-summary {{
-      margin: 7px 0 0;
-      color: var(--muted);
-      max-width: 52ch;
-    }}
-    .meta-list {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 16px;
-      list-style: none;
-      padding: 0;
-      margin: 0 0 24px;
-      color: var(--muted);
-      font-size: 0.95rem;
-    }}
-    .meta-list li {{
-      display: flex;
-      gap: 8px;
-      align-items: baseline;
-    }}
-    .sidebar {{
-      padding: 22px;
-      border: 1px solid var(--border);
-      border-radius: 26px;
-      background: var(--panel);
-      box-shadow: var(--shadow);
-      align-self: start;
-      position: sticky;
-      top: 24px;
-    }}
-    .markdown-body {{
-      font-size: 1.06rem;
-      line-height: 1.7;
-    }}
-    .answer-copy {{
-      font-size: 1.06rem;
-      line-height: 1.72;
-    }}
-    .status-card {{
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 26px;
-      padding: 22px;
-      box-shadow: var(--shadow);
-    }}
-    .status-list {{
-      display: grid;
-      gap: 14px;
-      margin: 0 0 14px;
-    }}
-    .status-list div {{
-      display: grid;
-      gap: 4px;
-      padding-top: 14px;
-      border-top: 1px solid var(--border);
-    }}
-    .status-list div:first-child {{
-      border-top: 0;
-      padding-top: 0;
-    }}
-    .status-list dt {{
-      color: var(--muted);
-      font-size: 0.78rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }}
-    .status-list dd {{
-      margin: 0;
-      color: var(--text);
-    }}
-    .status-warn {{
-      margin: 12px 0;
-      padding: 12px 14px;
-      border-radius: 16px;
-      background: rgba(150, 90, 56, 0.10);
-      color: #7d4a29;
-    }}
-    .action-row {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin: 14px 0 16px;
-    }}
-    .action-link {{
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      border-radius: 999px;
-      background: var(--text);
-      color: white;
-      padding: 10px 15px;
-      text-decoration: none;
-      font-size: 0.95rem;
-      box-shadow: 0 10px 24px rgba(25, 23, 19, 0.12);
-    }}
-    .action-link:hover {{
-      color: white;
-      background: var(--accent);
-      text-decoration: none;
-      transform: translateY(-1px);
-    }}
-    .action-link-muted {{
-      background: rgba(25, 23, 19, 0.07);
-      color: var(--text);
-      box-shadow: none;
-    }}
-    .action-link-muted:hover {{
-      color: var(--text);
-    }}
-    .answer-copy > :first-child {{
-      margin-top: 0;
-    }}
-    .markdown-body h1, .markdown-body h2, .markdown-body h3 {{
-      font-family: {DISPLAY_FONT};
-      letter-spacing: -0.02em;
-      margin-top: 1.6em;
-      margin-bottom: 0.45em;
-    }}
-    .markdown-body p, .markdown-body ul {{
-      margin: 0 0 1em;
-    }}
-    .markdown-body ul {{
-      padding-left: 1.2em;
-    }}
-    .markdown-body blockquote {{
-      margin: 1.2em 0;
-      padding-left: 1em;
-      border-left: 2px solid var(--border);
-      color: var(--muted);
-    }}
-    .summary-intro {{
-      margin-bottom: 10px;
-    }}
-    .summary-list {{
-      margin: 0;
-      padding-left: 1.1em;
-      color: var(--muted);
-      display: grid;
-      gap: 8px;
-    }}
-    .touched-panel .link-list li,
-    .section-panel .link-list li {{
-      padding: 11px 0;
-      border-top: 1px solid var(--border);
-    }}
-    .touched-panel .link-list li:first-child,
-    .section-panel .link-list li:first-child {{
-      border-top: 0;
-      padding-top: 0;
-    }}
-    .ingest-panel {{
-      position: relative;
-      overflow: hidden;
-    }}
-    .ingest-panel::after {{
-      content: "";
-      position: absolute;
-      inset: auto -14% -26% auto;
-      width: 220px;
-      height: 220px;
-      border-radius: 999px;
-      background: radial-gradient(circle, rgba(41, 92, 82, 0.14), transparent 70%);
-      pointer-events: none;
-    }}
-    .ask-panel,
-    .capture-panel,
-    .stats-panel,
-    .answer-panel,
-    .status-card,
-    .page,
-    .sidebar,
-    .section-panel {{
-      animation: rise-in 520ms ease both;
-    }}
-    .stats-panel {{
-      animation-delay: 60ms;
-    }}
-    .answer-panel {{
-      animation-delay: 80ms;
-    }}
-    .status-card {{
-      animation-delay: 100ms;
-    }}
-    @keyframes rise-in {{
-      from {{
-        opacity: 0;
-        transform: translateY(10px);
-      }}
-      to {{
-        opacity: 1;
-        transform: translateY(0);
-      }}
-    }}
-    @media (max-width: 860px) {{
-      header, .split, .hero-grid, .editorial-band {{ grid-template-columns: 1fr; display: grid; }}
-      header form {{ min-width: 0; }}
-      .ask-controls {{ grid-template-columns: 1fr; }}
-      .capture-controls {{ grid-template-columns: 1fr; }}
-      .panel-heading {{ grid-template-columns: 1fr; display: grid; align-items: start; }}
-      .sidebar {{ position: static; }}
-      .stats {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
-      .hero-stage::before {{ border-radius: 24px; }}
-      .shell {{ padding: 24px 18px 52px; }}
-    }}
-    @media (max-width: 560px) {{
-      .hero h1, article h1, section h1 {{
-        max-width: 100%;
-        font-size: clamp(2rem, 11vw, 3.1rem);
-      }}
-      .stats {{
-        grid-template-columns: 1fr 1fr;
-      }}
-      .page {{
-        padding: 24px 22px 28px;
-      }}
-      .ask-panel,
-      .capture-panel,
-      .answer-panel,
-      .stat,
-      .status-card,
-      .hero-note {{
-        border-radius: 22px;
-      }}
-    }}
-  </style>
+  <title>{safe_title} · oamc</title>
+  <style>{_LAYOUT_CSS}</style>
 </head>
 <body>
-  <div class="shell">
-    <header>
+  <header class="topbar">
+    <div class="topbar-inner">
       <a class="brand" href="/">
-        <span class="brand-mark">oamc</span>
-        <span class="brand-note">local wiki workspace</span>
+        <span class="brand-dot" aria-hidden="true"></span>
+        <div>
+          <div class="brand-mark">oamc</div>
+          <div class="brand-tag">private wiki · research mode</div>
+        </div>
       </a>
-      <form action="/search" method="get">
-        <input type="search" name="q" value="{escape(q)}" placeholder="Search notes, syntheses, entities..." />
-        <button type="submit">Search</button>
-      </form>
-    </header>
+      <div class="topbar-tools">
+        <form class="search-mini" action="/search" method="get" role="search">
+          <span aria-hidden="true">⌕</span>
+          <input type="search" name="q" value="{search_value}" placeholder="Search the wiki" aria-label="Search">
+          <button type="submit">go</button>
+        </form>
+      </div>
+    </div>
+  </header>
+  <div class="shell">
     <main>{body}</main>
+    <footer class="foot-hints">
+      <span><span class="kbd">/</span> focus ask</span>
+      <span><span class="kbd">⌘K</span> capture note</span>
+      <span><span class="kbd">esc</span> dismiss</span>
+    </footer>
   </div>
-  <script>
-    document.addEventListener("submit", async (event) => {{
-      const form = event.target;
-      if (!(form instanceof HTMLFormElement) || !form.hasAttribute("data-capture-form")) {{
-        return;
-      }}
-      event.preventDefault();
-      const status = form.parentElement?.querySelector("[data-capture-status]");
-      const button = form.querySelector('button[type="submit"]');
-      const textField = form.querySelector('textarea[name="text"]');
-      const titleField = form.querySelector('input[name="title"]');
-      const sourceUrlField = form.querySelector('input[name="source_url"]');
-      if (!(textField instanceof HTMLTextAreaElement)) {{
-        return;
-      }}
-      if (status instanceof HTMLElement) {{
-        status.dataset.state = "working";
-        status.textContent = "Capturing note and processing the inbox...";
-      }}
-      if (button instanceof HTMLButtonElement) {{
-        button.disabled = true;
-      }}
-      try {{
-        const response = await fetch("/capture", {{
-          method: "POST",
-          headers: {{ "Content-Type": "application/json" }},
-          body: JSON.stringify({{
-            text: textField.value,
-            title: titleField instanceof HTMLInputElement ? titleField.value : "",
-            source_url: sourceUrlField instanceof HTMLInputElement ? sourceUrlField.value : "",
-          }}),
-        }});
-        const payload = await response.json();
-        if (!response.ok || !payload.ok) {{
-          throw new Error(payload.message || "Could not capture the note.");
-        }}
-        if (payload.redirect) {{
-          window.location.assign(payload.redirect);
-          return;
-        }}
-        form.reset();
-        if (status instanceof HTMLElement) {{
-          status.dataset.state = "";
-          status.textContent = payload.message || "Captured note.";
-        }}
-      }} catch (error) {{
-        if (status instanceof HTMLElement) {{
-          status.dataset.state = "error";
-          status.textContent = error instanceof Error ? error.message : "Could not capture the note.";
-        }}
-      }} finally {{
-        if (button instanceof HTMLButtonElement) {{
-          button.disabled = false;
-        }}
-      }}
-    }});
-  </script>
+
+  <button class="fab" type="button" data-capture-trigger aria-haspopup="dialog">
+    <span class="fab-glyph" aria-hidden="true">＋</span>
+    <span>Capture note</span>
+    <span class="fab-kbd" aria-hidden="true">⌘K</span>
+  </button>
+
+  {render_capture_dialog()}
+
+  <div class="thinking" data-thinking aria-hidden="true">
+    <div class="thinking-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+    <div class="thinking-text">
+      <span data-thinking-message style="transition: opacity 220ms ease;">Searching the wiki</span>
+    </div>
+    <div class="thinking-progress" aria-hidden="true"><span></span></div>
+  </div>
+
+  <script>{_layout_js()}</script>
 </body>
 </html>"""
