@@ -623,7 +623,6 @@ def render_ask_error(question: str, scope: str, template: str, message: str) -> 
 def render_page(repo_paths: RepoPaths, target: Path) -> str:
     metadata, body = load_markdown(target)
     relative_path = target.relative_to(repo_paths.wiki_root).as_posix()
-    section = relative_path.split("/", 1)[0] if "/" in relative_path else "wiki"
     title = str(metadata.get("title") or target.stem)
     rendered = render_markdown(body)
     backlinks = find_backlinks(repo_paths, relative_path)
